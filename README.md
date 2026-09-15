@@ -1,0 +1,1 @@
+# hop-raster-type-plugin
