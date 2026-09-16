@@ -1,0 +1,139 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      companion_ref:
+        description: Vector/Raster revision to build and test with these Raster artifacts
+        required: true
+        default: main
+        type: string
+permissions:
+  contents: read
+jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+  publish:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.acceptance.outputs.ready == 'true'
+    needs: [verify, installed-e2e, acceptance]
+    uses: edigonzales/hop-plugin-ci/.github/workflows/plugin-publish.yml@990af4813013fa8d21f6447e7545ed5499f2f202
+    with:
+      ci-ref: 990af4813013fa8d21f6447e7545ed5499f2f202
+      repository-kind: snapshot
+      verified-artifact-name: hop-raster-type-plugin-canonical
+      pom-file: assemblies/pom.xml
+      artifact-id: hop-raster-type-plugin
+      plugin-root: plugins/misc/hop-raster-type
+      extra-maven-artifacts: '[{"file": ".ci/publish/pom.xml", "pom-file": ".ci/publish/pom.xml", "packaging": "pom"}, {"file": ".ci/publish/hop-raster-core-0.1.0-SNAPSHOT.jar", "pom-file": ".ci/publish/hop-raster-core.pom", "packaging": "jar"}, {"file": ".ci/publish/hop-raster-type-0.1.0-SNAPSHOT.jar", "pom-file": ".ci/publish/hop-raster-type.pom", "packaging": "jar"}, {"file": ".ci/publish/hop-raster-geotools-0.1.0-SNAPSHOT.jar", "pom-file": ".ci/publish/hop-raster-geotools.pom", "packaging": "jar"}]'
+    secrets:
+      MAVEN_USERNAME: ${{ secrets.INTERLIS_MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.INTERLIS_MAVEN_TOKEN }}
+
+  companion:
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      revision: ${{ steps.companion-revision.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: edigonzales/hop-vector-raster-plugin
+          ref: ${{ inputs.companion_ref || 'main' }}
+          path: companion
+      - id: companion-revision
+        run: echo "sha=$(git -C companion rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: edigonzales/hop-plugin-ci
+          ref: 990af4813013fa8d21f6447e7545ed5499f2f202
+          path: .ci/hop-plugin-ci
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: hop-raster-type-plugin-canonical
+          path: .ci/canonical
+      - name: Build companion against verified Raster artifacts
+        run: |
+          python .ci/hop-plugin-ci/scripts/write_maven_settings.py --output "$RUNNER_TEMP/settings.xml"
+          python scripts/install-verified-artifacts.py .ci/canonical --settings "$RUNNER_TEMP/settings.xml"
+          xvfb-run -a mvn -s "$RUNNER_TEMP/settings.xml" -B -ntp -f companion/pom.xml verify
+          python companion/scripts/check-distribution.py
+          mkdir -p .ci/e2e-inputs
+          python .ci/hop-plugin-ci/scripts/download_maven_artifact.py --group ch.so.agi --artifact hop-geometry-type-plugin --version 0.2.0-SNAPSHOT --extension zip --maven-settings "$RUNNER_TEMP/settings.xml" --output .ci/e2e-inputs/geometry.zip
+          curl -fL --retry 3 https://archive.apache.org/dist/hop/2.19.0/apache-hop-client-2.19.0.zip -o .ci/e2e-inputs/hop.zip
+          echo 'eb227ffe3386480f5ecb59e1d9fdbb16ace15b9ebd9e02da16cdca2c3cadc869f92275b0f607952fb2c5122986839a5b09b2c5762401dad128d8de6b0394643c  .ci/e2e-inputs/hop.zip' | sha512sum -c -
+          cp companion/assemblies/assemblies-hop-vector-raster/target/hop-vector-raster-plugin-*.zip .ci/e2e-inputs/vector.zip
+          cp .ci/canonical/hop-raster-type-plugin-*.zip .ci/e2e-inputs/raster.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raster-integration-inputs
+          path: .ci/e2e-inputs
+  installed-e2e:
+    needs: companion
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+        java: ['21', '25']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: edigonzales/hop-vector-raster-plugin
+          ref: ${{ needs.companion.outputs.revision }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: raster-integration-inputs
+          path: .ci/inputs
+      - name: Extract Hop
+        shell: python
+        run: |
+          import zipfile
+          from pathlib import Path
+          with zipfile.ZipFile('.ci/inputs/hop.zip') as z:
+              z.extractall('.ci/hop')
+              for entry in z.infolist():
+                  p=Path('.ci/hop')/entry.filename
+                  if p.is_file() and entry.external_attr >> 16: p.chmod(entry.external_attr >> 16)
+      - name: Installed integration
+        run: python scripts/run-installed-e2e.py --hop-home .ci/hop/hop --plugin-zip .ci/inputs/vector.zip --geometry-zip .ci/inputs/geometry.zip --raster-type-zip .ci/inputs/raster.zip --work-dir .ci/results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: raster-integration-${{ matrix.os }}-${{ matrix.java }}
+          path: .ci/results
+
+  acceptance:
+    needs: companion
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.evidence.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: hop-raster-type-plugin-canonical
+          path: .ci/canonical
+      - uses: actions/download-artifact@v4
+        with:
+          name: raster-integration-inputs
+          path: .ci/inputs
+      - id: evidence
+        name: Require complete acceptance for publication
+        run: python3 scripts/check-release-acceptance.py --evidence acceptance/release.json --artifact .ci/canonical/hop-raster-type-plugin-0.1.0-SNAPSHOT.zip --vector-artifact .ci/inputs/vector.zip --github-output "$GITHUB_OUTPUT"
