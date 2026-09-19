@@ -1,18 +1,6 @@
-# Raster V1 – lokaler Abnahmebericht
+# Raster V1 – lokaler technischer Bericht
 
-Stand: 16. September 2026. **Durch den Benutzer mit dokumentierten Ausnahmen abgenommen.**
-
-## Abnahmeentscheidung
-
-Der Benutzer hat nach Kenntnis der unten aufgeführten offenen Nachweise ausdrücklich erklärt:
-„Ich gebe die Abnahme frei.“ Die Abnahme gilt für die unten über SHA-256 bezeichneten Raster-
-und Vector/Raster-Artefakte. Sie umfasst die sieben statistisch offenen Leistungsszenarien
-und die fehlenden installierten Windows-Nachweise für Java 21/25 als akzeptierte Ausnahmen.
-
-Die Messwerte und automatischen Prüfergebnisse bleiben unverändert: Der technische
-Freigabeprüfer liefert weiterhin `ready: false`. Die Benutzerabnahme ist eine gesonderte
-Entscheidung; sie stellt diese offenen Nachweise nicht als bestanden dar. Eine Veröffentlichung
-wurde damit weder beauftragt noch ausgelöst.
+Stand: 16. September 2026.
 
 ## Ergebnis
 
@@ -58,6 +46,7 @@ wurde damit weder beauftragt noch ausgelöst.
 - `raster`: SHA-256 `6d40fd8f759030e01c956ee665d9320158aa16ae60243e72277596fb27ec542a`
 - `vector`: SHA-256 `c294c0e45350c18ca1f2414f2111344b966a17139fead5275d2d7090eadd74db`
 
-Die versionierten Rohberichte liegen unter `.work/acceptance-v3/`; `release.json` verknüpft sie mit SHA-256. Der Freigabeprüfer liefert erwartungsgemäss `ready: false`. Alte ZIPs und Ergebnisse liegen unter `.work/acceptance-v2/` und gelten nicht für die aktuellen Artefakte. Der Freigabe-Collector bindet Berichte über Prüfsummen und bewertet die Rohmessungen erneut. Offene Ergebnisse werden nicht als bestanden ausgegeben.
-
-Eine CI-Veröffentlichung benötigt die kanonischen CI-Artefakte und passende Nachweise für genau deren Prüfsummen. Lokale Ergebnisse sind nicht auf neu gebaute ZIPs übertragbar.
+Die versionierten Rohberichte liegen unter `.work/acceptance-v3/`. Alte ZIPs und Ergebnisse
+liegen unter `.work/acceptance-v2/` und gelten nicht für die aktuellen Artefakte. Die Berichte
+dienen der technischen Diagnose und Reproduzierbarkeit; offene Ergebnisse werden entsprechend
+als offen ausgewiesen.

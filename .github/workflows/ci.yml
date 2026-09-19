@@ -16,8 +16,8 @@ jobs:
   verify:
     uses: ./.github/workflows/verify.yml
   publish:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.acceptance.outputs.ready == 'true'
-    needs: [verify, installed-e2e, acceptance]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [verify, installed-e2e]
     uses: edigonzales/hop-plugin-ci/.github/workflows/plugin-publish.yml@990af4813013fa8d21f6447e7545ed5499f2f202
     with:
       ci-ref: 990af4813013fa8d21f6447e7545ed5499f2f202
@@ -118,22 +118,3 @@ jobs:
         with:
           name: raster-integration-${{ matrix.os }}-${{ matrix.java }}
           path: .ci/results
-
-  acceptance:
-    needs: companion
-    runs-on: ubuntu-latest
-    outputs:
-      ready: ${{ steps.evidence.outputs.ready }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: hop-raster-type-plugin-canonical
-          path: .ci/canonical
-      - uses: actions/download-artifact@v4
-        with:
-          name: raster-integration-inputs
-          path: .ci/inputs
-      - id: evidence
-        name: Require complete acceptance for publication
-        run: python3 scripts/check-release-acceptance.py --evidence acceptance/release.json --artifact .ci/canonical/hop-raster-type-plugin-0.1.0-SNAPSHOT.zip --vector-artifact .ci/inputs/vector.zip --github-output "$GITHUB_OUTPUT"

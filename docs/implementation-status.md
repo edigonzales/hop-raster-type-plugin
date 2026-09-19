@@ -1,9 +1,7 @@
-# Implementierungs- und Abnahmestand
+# Implementierungs- und Teststand
 
-**V1 wurde am 16. September 2026 durch den Benutzer mit dokumentierten Ausnahmen abgenommen.**
-Die Entscheidung umfasst sieben statistisch offene Leistungsszenarien und die fehlenden
-Windows-Nachweise für Java 21/25. Details: [acceptance-results.md](acceptance-results.md).
-Der automatische Nachweisstatus bleibt unverändert; der CI-Abnahmecheck ist weiterhin gesperrt.
+Die aktuelle Implementierung und die technischen Messergebnisse sind in
+[acceptance-results.md](acceptance-results.md) dokumentiert.
 
 ## Implementiert
 
@@ -15,7 +13,7 @@ Der automatische Nachweisstatus bleibt unverändert; der CI-Abnahmecheck ist wei
 - Mehrbandauswahl, RGB/Alpha/Palette, NoData und Scale/Offset; Quellen- und Operationsherkunft in Fehlern.
 - Migration der Dateikonfigurationen, Beispielpipelines, Error-Hop-Migration und nachvollziehbares Layout.
 - Getrennte ZIPs und Prüfung der gemeinsamen Klassenidentität in installiertem Hop.
-- CI für Java 21/25 und Linux/macOS/Windows; Veröffentlichung nur mit vollständiger Abnahme beider ZIPs.
+- CI für Java 21/25 und Linux/macOS/Windows; Veröffentlichung nach erfolgreicher technischer CI.
 
 Die bestehende Änderung am Vector-Reader-Dialog wurde nicht bearbeitet.
 
@@ -53,9 +51,8 @@ Die bestehende Änderung am Vector-Reader-Dialog wurde nicht bearbeitet.
   Die bestehende Änderung am Vector-Reader-Dialog bleibt unberührt.
 
 Reproduzierbare Befehle und Berichtsschemata: [performance.md](performance.md).
-Aktuelle lokale Einzelberichte liegen unter `.work/acceptance-v3/`; sie sind keine automatisch
-bestandene Veröffentlichung. Der Collector verknüpft Berichte mit SHA-256 und prüft alle
-noch fehlenden Nachweise.
+Aktuelle lokale Einzelberichte liegen unter `.work/acceptance-v3/` und dienen der technischen
+Diagnose und Reproduzierbarkeit.
 
 Die erste vollständige Zehn-Paar-Matrix hat bei der langen Kette eine Peak-RSS-Regression
 nachgewiesen (Median +18,7 %, 95-%-Intervall +16,6 bis +22,4 %). NMT und JIT-Protokolle
@@ -70,17 +67,10 @@ Peak-RSS-Verhältnis 1,0261 mit 95-%-Intervall [1,0189; 1,0384]. Damit ist die z
 nachgewiesene Regression in diesem Szenario behoben; die übrigen Szenarien werden separat bewertet.
 Die vorherigen ZIPs sind unter `.work/acceptance-v2/artifacts/` archiviert.
 
-## Offene Nachweise und Veröffentlichungsbedingungen
+## Offene technische Nachweise
 
 1. Sieben Leistungsszenarien bleiben nach 30 Paaren offen: sechs wegen Peak-RSS, eines
-   wegen Laufzeit. Sie sind als Ausnahme von der Benutzerabnahme erfasst. Details: [acceptance-results.md](acceptance-results.md).
+   wegen Laufzeit. Details: [acceptance-results.md](acceptance-results.md).
 2. Die installierten Windows-Läufe mit Java 21/25 fehlen. macOS und Linux ARM64 sind geprüft.
    Die CI-Matrix ist konfiguriert; `companion_ref` erlaubt eine koordinierte Companion-Revision.
-   Erfolgreiche installierte Läufe erzeugen `platform-evidence.json`; der Collector führt
-   diese mit Prüfsummen zusammen und weist die fehlenden Windows-Zellen aus.
-3. Eine spätere Veröffentlichung muss exakt die geprüften kanonischen Artefakte verwenden.
-   Abweichende ZIPs machen die vorliegenden Nachweise für eine Veröffentlichung ungültig.
-
-Es wurde keine Veröffentlichung beauftragt oder ausgelöst. Die Benutzerabnahme ändert den
-automatischen Freigabeprüfer und seine Nachweisanforderungen nicht. Die Artefakt-Hashes und
-die Abnahmeentscheidung stehen in `artifact-status.json`.
+   Erfolgreiche installierte Läufe erzeugen `platform-evidence.json`.

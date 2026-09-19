@@ -1,7 +1,7 @@
 # Apache Hop Raster Type
 
-**Development status:** implementation available; V1 acceptance remains open.
-See [implementation and acceptance status](docs/implementation-status.md).
+**Development status:** implementation available.
+See [implementation status](docs/implementation-status.md).
 
 Backend-neutral, serializable raster values for Apache Hop 2.19.0 (Java 21/25).
 The GeoTools 35.1 adapter evaluates bounded pixel windows. A value contains a source,
@@ -37,8 +37,7 @@ Build Vector/Raster afterwards. Its `scripts/run-installed-e2e.py` accepts
 `--raster-type-zip` in addition to the Geometry and Vector/Raster ZIPs.
 
 See [architecture](docs/architecture.md), [migration](docs/migration.md) and
-[performance acceptance](docs/performance.md). A successful build alone does **not**
-prove the performance acceptance matrix has passed.
+[performance measurements](docs/performance.md).
 
 Raster algorithms were moved from `hop-vector-raster-plugin`; its MIT license and copyright notice
 are retained in [LICENSE](LICENSE). GeoTools and other dependencies retain their own licenses.

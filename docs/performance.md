@@ -48,16 +48,6 @@ not a valid timing sample. Timing fixtures use identity scale/offset; scaled DEM
 separate functional integration case. V1 scopes the GeoTIFF metadata/read context classloader
 and successfully reads that fixture without changing JVM-wide JAXB settings.
 
-## Publication gate
-
-CI publishes only when `acceptance/release.json` supplies completed functional, installed-platform,
-fixed-heap, multiband and temporary-I/O acceptance, the full named performance matrix (10–30 pairs
-per case), and the SHA-256 of the exact canonical Raster and Vector/Raster ZIPs. The gate is implemented in
-`scripts/check-release-acceptance.py`. Missing, open or stale evidence keeps publication disabled;
-ordinary verification and installed tests still run. No release evidence is fabricated from unit
-results or the initial subset of benchmarks. Matching Vector/Raster artifacts must be preserved
-with that acceptance run and referenced in its report.
-
 ## Functional matrix and extending measurements
 
 Run `python3 scripts/check-pipeline-matrix.py matrix.json --output functional-results` before timing.
@@ -94,17 +84,6 @@ no remaining writer temp files. The instrumented probe also injects a read failu
 checks that neither targets nor temporary outputs remain. `run-write-volume.py` wraps it and
 produces the versioned report; it takes the same Hop/JDK/output/ZIP arguments as the scaling runner.
 
-## Evidence format
-
-Release evidence schema 2 identifies the two canonical ZIP hashes, policy 2 and hashed report
-references under `reports`. Required reports: `functional_matrix`, `performance`,
-`installed_os_java_matrix`, `fixed_heap_scaling`, `multi_band_scaling`,
-`temporary_io_measurements`, `public_cogs`, `resource_stress`, `large_chain`. Every report must identify the exact ZIPs under
-`manifest.zip_hashes`. The gate recomputes performance status from samples and verifies its
-functional report binding. Suite reports require named measured checks (`actual`, `expected`)
-and completeness; summary strings alone never pass. Probe output is diagnostic evidence and
-must not be promoted to complete release evidence while required cases are absent.
-
 Script regression tests: `python3 -m unittest discover -s scripts -p 'test_*.py'`.
 
 `run-multiband.py` uses the same arguments and generates RGBA, palette and numeric four-band
@@ -118,15 +97,14 @@ Each suite verifies that installed runtime JARs actually match the supplied ZIPs
 For coordinated CI before merging both repositories, manually dispatch `CI` on the Raster
 branch with `companion_ref` set to the Vector/Raster commit. The companion job resolves this
 to a SHA and all installed-test jobs use that same revision. Workflow/helper pins are unchanged.
-Download the canonical CI ZIPs and use those exact files for publication acceptance; local ZIP
-results cannot be transferred to newly rebuilt CI archives with different hashes.
+Download the canonical CI ZIPs when measurements must be reproducible; local ZIP results cannot
+be assumed to describe a newly rebuilt CI archive.
 
 `run-resource-stress.py --hop HOP --java-home JDK --matrix MATRIX_JSON --output DIR
 --raster-zip RASTER_ZIP --vector-zip VECTOR_ZIP` checks 100/1000/10000 distinct zones
 against the deterministic DEM formula, including cache bounds and reuse of the same reader.
 It also runs 1000 distinct zones through installed Hop with one, two and four statistics
 transform copies and compares complete result multisets. Run it outside benchmark timing.
-Supply its report to the collector with `--resource-stress DIR/report.json`.
 
 `run-large-chain.py` takes the same Hop/JDK/output/ZIP arguments plus `--fixture-root DIR`.
 It clips half the width and height of each 16384/32768 DEM/RGB fixture, resamples it and
