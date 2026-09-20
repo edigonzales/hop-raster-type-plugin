@@ -21,6 +21,8 @@ Raster Reader → Raster Clip → Raster Reproject → Raster Writer
 
 The companion `hop-vector-raster-plugin` owns the user-facing transforms and ships the
 GeoTools adapter. Install the matching Geometry Type, Raster Type and Vector/Raster ZIPs.
+The Geometry Type ZIP supplies the shared GeoTools 35.1, Imagen 0.9.2, ImageIO-Ext and UOM
+runtime; Raster Type and Vector/Raster do not package another copy.
 Do not copy the shared Raster model JAR into multiple plugin directories.
 
 ## Build and verification
