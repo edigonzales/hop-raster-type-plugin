@@ -8,12 +8,26 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.List;
 import java.util.function.BooleanSupplier;
+import java.util.function.IntConsumer;
 import javax.imageio.ImageWriteParam;
 import org.eclipse.imagen.*;
 import org.geotools.gce.geotiff.GeoTiffWriteParams;
 
 /** Explicit execution context. One instance per consumer transform copy. */
 public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable {
+  private static final List<String> KNOWN_TIFF_COMPRESSION_TYPES =
+      List.of(
+          "CCITT RLE",
+          "CCITT T.4",
+          "CCITT T.6",
+          "LZW",
+          "JPEG",
+          "ZLib",
+          "PackBits",
+          "Deflate",
+          "EXIF JPEG",
+          "ZSTD");
+
   private RasterReference current;
   private GeoTiffSource source;
   private RasterDescriptor sourceDescriptor;
@@ -219,6 +233,20 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
   @Override
   public void write(RasterDataset value, Path target, boolean overwrite, BooleanSupplier stopped)
       throws Exception {
+    write(value, target, overwrite, stopped, "Deflate", ignored -> {});
+  }
+
+  @Override
+  public void write(
+      RasterDataset value,
+      Path target,
+      boolean overwrite,
+      BooleanSupplier stopped,
+      String compression,
+      IntConsumer progress)
+      throws Exception {
+    String selectedCompression =
+        compression == null || compression.isBlank() ? "Deflate" : compression;
     Path output = target.toAbsolutePath().normalize();
     if (!value.source().remote()) {
       var original = Path.of(value.source().location());
@@ -238,8 +266,12 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
                 ? derived.image()
                 : new SourceImage(src, stopped, session.outputCache);
         var options = new GeoTiffWriteParams();
-        options.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
-        options.setCompressionType("Deflate");
+        if ("None".equalsIgnoreCase(selectedCompression)) {
+          options.setCompressionMode(ImageWriteParam.MODE_DISABLED);
+        } else {
+          options.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+          options.setCompressionType(selectedCompression);
+        }
         options.setTilingMode(ImageWriteParam.MODE_EXPLICIT);
         options.setTiling(512, 512);
         options.setForceToBigTIFF(
@@ -265,7 +297,8 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
             offsets,
             src.noData(0),
             src.colorInfo(),
-            options);
+            options,
+            progress == null ? ignored -> {} : progress);
         if (stopped.getAsBoolean()) throw new java.io.IOException("Raster write stopped");
         if (overwrite) Files.move(temp, output, StandardCopyOption.REPLACE_EXISTING);
         else Files.move(temp, output);
@@ -282,6 +315,19 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
         if (image != null) image.dispose();
         Files.deleteIfExists(temp);
       }
+    }
+  }
+
+  /** Compression names supported by the TIFF writer bundled with this backend. */
+  public static List<String> compressionTypes() {
+    try {
+      var type = Class.forName("it.geosolutions.imageio.plugins.tiff.TIFFImageWriteParam");
+      var params = type.getConstructor(java.util.Locale.class).newInstance(new Object[] {null});
+      type.getMethod("setCompressionMode", int.class)
+          .invoke(params, ImageWriteParam.MODE_EXPLICIT);
+      return List.of((String[]) type.getMethod("getCompressionTypes").invoke(params));
+    } catch (ReflectiveOperationException | LinkageError unavailableInCallerClassLoader) {
+      return KNOWN_TIFF_COMPRESSION_TYPES;
     }
   }
 

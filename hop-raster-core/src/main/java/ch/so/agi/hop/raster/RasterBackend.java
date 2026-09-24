@@ -14,4 +14,19 @@ public interface RasterBackend {
       boolean overwrite,
       java.util.function.BooleanSupplier stopped)
       throws Exception;
+
+  /**
+   * Writes with an explicit TIFF compression and reports encoder progress from 0 to 100.
+   * Backends that predate this overload keep their original behavior.
+   */
+  default void write(
+      RasterDataset source,
+      java.nio.file.Path output,
+      boolean overwrite,
+      java.util.function.BooleanSupplier stopped,
+      String compression,
+      java.util.function.IntConsumer progress)
+      throws Exception {
+    write(source, output, overwrite, stopped);
+  }
 }

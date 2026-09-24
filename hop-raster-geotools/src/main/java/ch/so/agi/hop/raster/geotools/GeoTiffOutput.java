@@ -10,8 +10,11 @@ import java.awt.color.ColorSpace;
 import java.awt.geom.AffineTransform;
 import java.awt.image.*;
 import java.nio.file.Path;
+import java.util.function.IntConsumer;
 import javax.imageio.IIOImage;
 import javax.imageio.ImageTypeSpecifier;
+import javax.imageio.ImageWriter;
+import javax.imageio.event.IIOWriteProgressListener;
 import javax.imageio.stream.FileImageOutputStream;
 import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
 import org.geotools.coverage.grid.io.imageio.geotiff.CRS2GeoTiffMetadataAdapter;
@@ -54,6 +57,21 @@ final class GeoTiffOutput {
       RasterColorInfo color,
       GeoTiffWriteParams options)
       throws Exception {
+    write(file, image, crs, gridToWorld, scales, offsets, noData, color, options, ignored -> {});
+  }
+
+  static void write(
+      Path file,
+      RenderedImage image,
+      CoordinateReferenceSystem crs,
+      AffineTransform gridToWorld,
+      double[] scales,
+      double[] offsets,
+      Double noData,
+      RasterColorInfo color,
+      GeoTiffWriteParams options,
+      IntConsumer progress)
+      throws Exception {
     var encoder = new CRS2GeoTiffMetadataAdapter(crs).parseCoordinateReferenceSystem();
     var transform = new AffineTransform(gridToWorld);
     // GeoTIFF indices start at zero and refer to the upper-left pixel corner.
@@ -63,6 +81,8 @@ final class GeoTiffOutput {
     encoder.setModelTransformation(transform);
     if (noData != null) encoder.setNoData(noData);
     var writer = new TIFFImageWriterSpi().createWriterInstance();
+    IIOWriteProgressListener listener = progressListener(progress);
+    writer.addIIOWriteProgressListener(listener);
     try (var stream = new FileImageOutputStream(file.toFile())) {
       var params = (TIFFImageWriteParam) options.getAdaptee();
       params.setForceToBigTIFF(options.isForceToBigTIFF());
@@ -125,12 +145,43 @@ final class GeoTiffOutput {
           new IIOImage(image, null, directory.getAsMetadata()),
           params);
     } finally {
+      writer.removeIIOWriteProgressListener(listener);
       writer.dispose();
     }
     // ImageIO reconstructs ColorMap from IndexColorModel's 8-bit components during write,
     // overriding supplied metadata. Restore the original UInt16 entries in the temporary file.
     if (color.kind() == RasterColorInfo.Kind.PALETTE)
       restorePalette(file, color.colorMap(), image.getSampleModel().getDataType());
+  }
+
+  private static IIOWriteProgressListener progressListener(IntConsumer progress) {
+    IntConsumer sink = progress == null ? ignored -> {} : progress;
+    return new IIOWriteProgressListener() {
+      @Override
+      public void imageStarted(ImageWriter source, int imageIndex) {}
+
+      @Override
+      public void imageProgress(ImageWriter source, float percentageDone) {
+        sink.accept(Math.max(0, Math.min(100, Math.round(percentageDone))));
+      }
+
+      @Override
+      public void imageComplete(ImageWriter source) {
+        sink.accept(100);
+      }
+
+      @Override
+      public void thumbnailStarted(ImageWriter source, int imageIndex, int thumbnailIndex) {}
+
+      @Override
+      public void thumbnailProgress(ImageWriter source, float percentageDone) {}
+
+      @Override
+      public void thumbnailComplete(ImageWriter source) {}
+
+      @Override
+      public void writeAborted(ImageWriter source) {}
+    };
   }
 
   private static void restorePalette(Path file, char[] original, int type)
