@@ -19,6 +19,32 @@ class RasterWriteOptionsTest {
   }
 
   @Test
+  void jpegQualityDefaultsAndValidates() {
+    assertEquals(75, RasterWriteOptions.cog("JPEG").jpegQuality());
+    assertEquals(90, new RasterWriteOptions(null, null, null, 512, "JPEG", 90).jpegQuality());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new RasterWriteOptions(
+                RasterWriteOptions.Format.COG,
+                RasterWriteOptions.Overviews.AUTO,
+                RasterWriteOptions.Resampling.AVERAGE,
+                512,
+                "JPEG",
+                0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new RasterWriteOptions(
+                RasterWriteOptions.Format.COG,
+                RasterWriteOptions.Overviews.AUTO,
+                RasterWriteOptions.Resampling.AVERAGE,
+                512,
+                "JPEG",
+                101));
+  }
+
+  @Test
   void rejectsInvalidBlockSizes() {
     assertThrows(
         IllegalArgumentException.class,

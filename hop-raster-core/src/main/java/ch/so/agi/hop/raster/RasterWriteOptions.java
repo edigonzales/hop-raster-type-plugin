@@ -2,7 +2,12 @@ package ch.so.agi.hop.raster;
 
 /** Backend-neutral raster write request: output format, compression and overview behavior. */
 public record RasterWriteOptions(
-    Format format, Overviews overviews, Resampling resampling, int blockSize, String compression) {
+    Format format,
+    Overviews overviews,
+    Resampling resampling,
+    int blockSize,
+    String compression,
+    int jpegQuality) {
   public enum Format {
     GEOTIFF,
     COG
@@ -25,6 +30,14 @@ public record RasterWriteOptions(
     compression = compression == null || compression.isBlank() ? "Deflate" : compression;
     if (blockSize < 16 || blockSize > 4096 || Integer.bitCount(blockSize) != 1)
       throw new IllegalArgumentException("Block size must be a power of two between 16 and 4096");
+    if (jpegQuality < 1 || jpegQuality > 100)
+      throw new IllegalArgumentException("JPEG quality must be between 1 and 100");
+  }
+
+  /** Keeps the original signature; the JPEG quality defaults to 75. */
+  public RasterWriteOptions(
+      Format format, Overviews overviews, Resampling resampling, int blockSize, String compression) {
+    this(format, overviews, resampling, blockSize, compression, 75);
   }
 
   /** Plain tiled GeoTIFF; overview and resampling settings do not apply. */
