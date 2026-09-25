@@ -53,7 +53,10 @@ request additionally writes internal overviews, IFDs and tag values before the t
 data before the main image, a GDAL structural-metadata ghost area and block leaders/trailers.
 Overviews are generated into compressed temporary stores that are removed after the write; the
 temporary footprint stays proportional to the overview data and never materializes a second copy
-of the main image.
+of the main image. JPEG output covers single-band numeric and three-band RGB byte rasters: RGB uses
+the YCbCr color space, the shared quantization and Huffman tables are stored once per IFD and tile
+streams stay abbreviated. Lossy output keeps a lossless cascade store for the overview pyramid and
+deletes each level after the next one is generated.
 
 Only the writer materializes raster files. It uses a temporary sibling of the destination and
 publishes it after success. It rejects writing to the original source, including hard-link aliases.

@@ -16,7 +16,7 @@ Raster Reader → Raster Clip → Raster Reproject → Raster Writer
 
 - `hop-raster-core`: immutable descriptors, sources, operations, tile/reader API, bounded wire codec.
 - `hop-raster-type`: `ValueMetaRaster` (type ID `727837`), registered in `sogeo-geometry`.
-- `hop-raster-geotools`: local GeoTIFF/public HTTP range reads, clip, resampling and GeoTIFF/COG output.
+- `hop-raster-geotools`: local GeoTIFF/public HTTP range reads, clip, resampling and GeoTIFF/COG output (lossless codecs plus JPEG/YCbCr for byte rasters).
 - `assemblies`: `hop-raster-type-plugin-0.1.0-SNAPSHOT.zip`.
 
 The companion `hop-vector-raster-plugin` owns the user-facing transforms and ships the
