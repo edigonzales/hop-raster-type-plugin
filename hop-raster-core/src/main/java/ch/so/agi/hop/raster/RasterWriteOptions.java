@@ -36,11 +36,17 @@ public record RasterWriteOptions(
 
   /** Keeps the original signature; the JPEG quality defaults to 75. */
   public RasterWriteOptions(
-      Format format, Overviews overviews, Resampling resampling, int blockSize, String compression) {
+      Format format,
+      Overviews overviews,
+      Resampling resampling,
+      int blockSize,
+      String compression) {
     this(format, overviews, resampling, blockSize, compression, 75);
   }
 
-  /** Plain tiled GeoTIFF; overview and resampling settings do not apply. */
+  /**
+   * Plain tiled GeoTIFF without overviews. Use the full constructor to request internal overviews.
+   */
   public static RasterWriteOptions geoTiff(String compression) {
     return new RasterWriteOptions(
         Format.GEOTIFF, Overviews.NONE, Resampling.NEAREST, 512, compression);

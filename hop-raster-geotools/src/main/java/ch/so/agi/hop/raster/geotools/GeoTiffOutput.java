@@ -72,6 +72,35 @@ final class GeoTiffOutput {
       GeoTiffWriteParams options,
       IntConsumer progress)
       throws Exception {
+    write(
+        file,
+        image,
+        crs,
+        gridToWorld,
+        scales,
+        offsets,
+        noData,
+        color,
+        options,
+        progress,
+        java.util.List.of(),
+        () -> false);
+  }
+
+  static void write(
+      Path file,
+      RenderedImage image,
+      CoordinateReferenceSystem crs,
+      AffineTransform gridToWorld,
+      double[] scales,
+      double[] offsets,
+      Double noData,
+      RasterColorInfo color,
+      GeoTiffWriteParams options,
+      IntConsumer progress,
+      java.util.List<? extends RenderedImage> overviews,
+      java.util.function.BooleanSupplier stopped)
+      throws Exception {
     var directory =
         directory(
             ImageTypeSpecifier.createFromRenderedImage(image),
@@ -87,15 +116,44 @@ final class GeoTiffOutput {
             color,
             options);
     var writer = new TIFFImageWriterSpi().createWriterInstance();
-    IIOWriteProgressListener listener = progressListener(progress);
+    int[] imageIndex = {0};
+    int imageCount = 1 + overviews.size();
+    IIOWriteProgressListener listener =
+        progressListener(
+            value -> {
+              try {
+                OverviewPyramid.checkStopped(stopped);
+              } catch (java.io.IOException e) {
+                throw new IllegalStateException(e);
+              }
+              if (progress != null) progress.accept((imageIndex[0] * 100 + value) / imageCount);
+            });
     writer.addIIOWriteProgressListener(listener);
     try (var stream = new FileImageOutputStream(file.toFile())) {
       var params = (TIFFImageWriteParam) options.getAdaptee();
       writer.setOutput(stream);
+      OverviewPyramid.checkStopped(stopped);
+      // ImageIO-Ext 2.1.1 prepareWriteSequence writes a classic TIFF header before
+      // seeing forceToBigTIFF. Write the main image normally, then append IFDs;
+      // writeInsert reads the actual header and preserves its offset width.
       writer.write(
           writer.getDefaultStreamMetadata(params),
           new IIOImage(image, null, directory.getAsMetadata()),
           params);
+      for (RenderedImage overview : overviews) {
+        OverviewPyramid.checkStopped(stopped);
+        imageIndex[0]++;
+        var reduced = TIFFDirectory.createFromMetadata(directory.getAsMetadata());
+        for (int tag : new int[] {33550, 33922, 34264, 34735, 34736, 34737})
+          reduced.removeTIFFField(tag);
+        reduced.addTIFFField(
+            new TIFFField(
+                new TIFFTag("NewSubfileType", 254, 1 << TIFFTag.TIFF_LONG),
+                TIFFTag.TIFF_LONG,
+                1,
+                new long[] {1}));
+        writer.writeInsert(-1, new IIOImage(overview, null, reduced.getAsMetadata()), params);
+      }
     } finally {
       writer.removeIIOWriteProgressListener(listener);
       writer.dispose();
@@ -136,8 +194,7 @@ final class GeoTiffOutput {
     try {
       var params = (TIFFImageWriteParam) options.getAdaptee();
       params.setForceToBigTIFF(options.isForceToBigTIFF());
-      var metadata =
-          GeoTiffWriter.createGeoTiffIIOMetadata(writer, type, encoder, params);
+      var metadata = GeoTiffWriter.createGeoTiffIIOMetadata(writer, type, encoder, params);
       var directory = TIFFDirectory.createFromMetadata(metadata);
       int photo =
           switch (color.kind()) {
@@ -240,25 +297,31 @@ final class GeoTiffOutput {
           throw new java.io.IOException("Invalid BigTIFF header");
         ifd = stream.readLong();
       } else ifd = stream.readUnsignedInt();
-      stream.seek(ifd);
-      long entries = big ? stream.readLong() : stream.readUnsignedShort();
-      long start = stream.getStreamPosition();
       int size = 1 << DataBuffer.getDataTypeSize(type);
-      for (long i = 0; i < entries; i++) {
-        stream.seek(start + i * (big ? 20 : 12));
-        int tag = stream.readUnsignedShort(), fieldType = stream.readUnsignedShort();
-        long count = big ? stream.readLong() : stream.readUnsignedInt();
-        long offset = big ? stream.readLong() : stream.readUnsignedInt();
-        if (tag != 320) continue;
-        if (fieldType != TIFFTag.TIFF_SHORT || count != 3L * size)
-          throw new java.io.IOException("Unexpected output palette layout");
-        stream.seek(offset);
-        int n = original.length / 3;
-        for (int channel = 0; channel < 3; channel++)
-          for (int j = 0; j < size; j++) stream.writeShort(j < n ? original[channel * n + j] : 0);
-        return;
+      while (ifd != 0) {
+        stream.seek(ifd);
+        long entries = big ? stream.readLong() : stream.readUnsignedShort();
+        long start = stream.getStreamPosition();
+        boolean found = false;
+        for (long i = 0; i < entries; i++) {
+          stream.seek(start + i * (big ? 20 : 12));
+          int tag = stream.readUnsignedShort(), fieldType = stream.readUnsignedShort();
+          long count = big ? stream.readLong() : stream.readUnsignedInt();
+          long offset = big ? stream.readLong() : stream.readUnsignedInt();
+          if (tag != 320) continue;
+          if (fieldType != TIFFTag.TIFF_SHORT || count != 3L * size)
+            throw new java.io.IOException("Unexpected output palette layout");
+          stream.seek(offset);
+          int n = original.length / 3;
+          for (int channel = 0; channel < 3; channel++)
+            for (int j = 0; j < size; j++) stream.writeShort(j < n ? original[channel * n + j] : 0);
+          found = true;
+          break;
+        }
+        if (!found) throw new java.io.IOException("Output palette tag missing");
+        stream.seek(start + entries * (big ? 20 : 12));
+        ifd = big ? stream.readLong() : stream.readUnsignedInt();
       }
-      throw new java.io.IOException("Output palette tag missing");
     }
   }
 

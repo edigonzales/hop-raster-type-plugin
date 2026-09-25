@@ -1,13 +1,16 @@
 package ch.so.agi.hop.raster.geotools;
 
+import static ch.so.agi.hop.raster.geotools.OverviewPyramid.generate;
+import static ch.so.agi.hop.raster.geotools.OverviewPyramid.planLevels;
+
 import ch.so.agi.hop.raster.RasterWriteOptions;
+import ch.so.agi.hop.raster.geotools.OverviewPyramid.Level;
 import it.geosolutions.imageio.plugins.tiff.TIFFDirectory;
 import it.geosolutions.imageio.plugins.tiff.TIFFField;
 import it.geosolutions.imageio.plugins.tiff.TIFFTag;
 import java.awt.Rectangle;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BandedSampleModel;
-import java.awt.image.DataBuffer;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -21,10 +24,10 @@ import javax.imageio.ImageWriteParam;
 import org.geotools.gce.geotiff.GeoTiffWriteParams;
 
 /**
- * Writes a Cloud Optimized GeoTIFF: tiled image with internal overviews, IFDs and tag values
- * before the tile data, overview data before the main image data, GDAL-compatible ghost area and
- * block leaders/trailers. Overviews are generated into compressed temporary stores and are
- * compressed only once.
+ * Writes a Cloud Optimized GeoTIFF: tiled image with internal overviews, IFDs and tag values before
+ * the tile data, overview data before the main image data, GDAL-compatible ghost area and block
+ * leaders/trailers. Overviews are generated into compressed temporary stores and are compressed
+ * only once.
  */
 final class CogOutput {
   private static final String GHOST_TEXT =
@@ -35,9 +38,6 @@ final class CogOutput {
           + "KNOWN_INCOMPATIBLE_EDITION=NO\n ";
 
   private CogOutput() {}
-
-  /** One overview level: the lossless cascade store and the blocks for the output file. */
-  private record Level(CogBlockStore lossless, CogBlockStore output) {}
 
   static void write(
       Path target,
@@ -149,7 +149,7 @@ final class CogOutput {
                 splitCodecs ? (CogJpegCodec) outputCodec : null,
                 target.getParent(),
                 stopped,
-                work);
+                work::overview);
         levels.add(level);
         if (index > 0) {
           Level parent = levels.get(index - 1);
@@ -157,7 +157,14 @@ final class CogOutput {
         }
         previous =
             new CogSamples.Store(
-                level.lossless(), dims[0], dims[1], dataType, bands, noDataByBand, block, storeCodec);
+                level.lossless(),
+                dims[0],
+                dims[1],
+                dataType,
+                bands,
+                noDataByBand,
+                block,
+                storeCodec);
       }
 
       String ghost =
@@ -185,10 +192,7 @@ final class CogOutput {
         tiff.writeFrontArea();
       }
     } finally {
-      for (Level level : levels) {
-        level.output().close();
-        if (level.lossless() != level.output()) level.lossless().close();
-      }
+      for (Level level : levels) level.close();
       if (outputCodec != null && outputCodec != storeCodec) outputCodec.close();
       if (storeCodec != null) storeCodec.close();
     }
@@ -220,15 +224,13 @@ final class CogOutput {
         checkStopped(stopped);
         int width = Math.min(block, bounds.width - tx * block);
         int height = Math.min(block, bounds.height - ty * block);
-        double[][] window =
-            samples.read(bounds.x + tx * block, bounds.y + ty * block, width, height);
+        double[][] window = samples.read(tx * block, ty * block, width, height);
         for (int band = 0; band < bands; band++) {
           for (int row = 0; row < height; row++) {
             System.arraycopy(window[band], row * width, padded[band], row * block, width);
             Arrays.fill(padded[band], row * block + width, row * block + block, 0);
           }
-          if (height < block)
-            Arrays.fill(padded[band], height * block, padded[band].length, 0);
+          if (height < block) Arrays.fill(padded[band], height * block, padded[band].length, 0);
         }
         CogTile.pack(padded, block, bands, dataType, raw);
         buffer.reset();
@@ -243,130 +245,6 @@ final class CogOutput {
         work.assembled();
       }
     }
-  }
-
-  /**
-   * Generates one overview level. The lossless store feeds the next level; the output store holds
-   * the blocks for the final file and is only separate when the output codec is lossy.
-   */
-  private static Level generate(
-      CogSamples previous,
-      int[] dims,
-      RasterWriteOptions.Resampling resampling,
-      int block,
-      int bands,
-      int dataType,
-      Double[] noData,
-      CogTileCodec storeCodec,
-      CogJpegCodec jpeg,
-      Path directory,
-      BooleanSupplier stopped,
-      Work work)
-      throws Exception {
-    int width = dims[0], height = dims[1];
-    int across = (width + block - 1) / block;
-    int down = (height + block - 1) / block;
-    CogBlockStore store = CogBlockStore.create(directory, ".hop-raster-ovr-", across * down);
-    CogBlockStore output =
-        jpeg == null
-            ? store
-            : CogBlockStore.create(directory, ".hop-raster-jpeg-", across * down);
-    try {
-      int bytes = CogTile.sampleBytes(dataType);
-      int stride = block * bands * bytes;
-      byte[] raw = new byte[block * block * bands * bytes];
-      double[][] outputPixels = new double[bands][block * block];
-      double[][] sums = new double[bands][block * block];
-      int[][] counts = new int[bands][block * block];
-      boolean average = resampling == RasterWriteOptions.Resampling.AVERAGE;
-      CogTileBuffer storeBuffer = new CogTileBuffer();
-      CogTileBuffer outputBuffer = new CogTileBuffer();
-      for (int ty = 0; ty < down; ty++) {
-        for (int tx = 0; tx < across; tx++) {
-          checkStopped(stopped);
-          int originX = tx * 2 * block, originY = ty * 2 * block;
-          for (int band = 0; band < bands; band++) {
-            Arrays.fill(outputPixels[band], 0);
-            if (average) {
-              Arrays.fill(sums[band], 0);
-              Arrays.fill(counts[band], 0);
-            }
-          }
-          for (int dy = 0; dy < 2; dy++) {
-            for (int dx = 0; dx < 2; dx++) {
-              int sx = originX + dx * block, sy = originY + dy * block;
-              int sw = Math.min(block, previous.width() - sx);
-              int sh = Math.min(block, previous.height() - sy);
-              if (sw <= 0 || sh <= 0) continue;
-              double[][] input = previous.read(sx, sy, sw, sh);
-              for (int band = 0; band < bands; band++) {
-                if (average) {
-                  for (int row = 0; row < sh; row++) {
-                    for (int column = 0; column < sw; column++) {
-                      double value = input[band][row * sw + column];
-                      if (!previous.valid(value, band)) continue;
-                      int ox = (sx + column) / 2 - tx * block;
-                      int oy = (sy + row) / 2 - ty * block;
-                      sums[band][oy * block + ox] += value;
-                      counts[band][oy * block + ox]++;
-                    }
-                  }
-                } else {
-                  for (int row = (sy & 1) == 0 ? 0 : 1; row < sh; row += 2) {
-                    for (int column = ((sx & 1) == 0 ? 0 : 1); column < sw; column += 2) {
-                      int ox = (sx + column) / 2 - tx * block;
-                      int oy = (sy + row) / 2 - ty * block;
-                      outputPixels[band][oy * block + ox] = input[band][row * sw + column];
-                    }
-                  }
-                }
-              }
-            }
-          }
-          if (average) {
-            for (int band = 0; band < bands; band++) {
-              for (int pixel = 0; pixel < block * block; pixel++) {
-                if (counts[band][pixel] == 0) {
-                  outputPixels[band][pixel] = invalid(noData[band], dataType);
-                } else {
-                  double value = sums[band][pixel] / counts[band][pixel];
-                  if (dataType != DataBuffer.TYPE_FLOAT && dataType != DataBuffer.TYPE_DOUBLE)
-                    value = Math.rint(value);
-                  outputPixels[band][pixel] = value;
-                }
-              }
-            }
-          }
-          CogTile.pack(outputPixels, block, bands, dataType, raw);
-          storeBuffer.reset();
-          int length;
-          try (var stream = storeBuffer.open()) {
-            length = storeCodec.encode(stream, raw, block, block, stride);
-          }
-          store.append(storeBuffer.data(), length);
-          if (jpeg != null) {
-            outputBuffer.reset();
-            int outputLength;
-            try (var stream = outputBuffer.open()) {
-              outputLength = jpeg.encode(stream, raw, block, block, stride);
-            }
-            output.append(outputBuffer.data(), outputLength);
-          }
-          work.overview();
-        }
-      }
-      return new Level(store, output);
-    } catch (Exception e) {
-      store.close();
-      if (output != store) output.close();
-      throw e;
-    }
-  }
-
-  private static double invalid(Double noData, int dataType) {
-    if (noData != null) return noData;
-    if (dataType == DataBuffer.TYPE_FLOAT || dataType == DataBuffer.TYPE_DOUBLE) return Double.NaN;
-    return 0;
   }
 
   private static CogTiff.Directory mainDirectory(
@@ -413,7 +291,8 @@ final class CogOutput {
             writeParams);
     if (jpeg != null) metadata = jpeg.prepareDirectory(metadata);
     CogTiff.Directory directory = new CogTiff.Directory();
-    for (TIFFField field : metadata.getTIFFFields()) directory.set(field);    for (int tag :
+    for (TIFFField field : metadata.getTIFFFields()) directory.set(field);
+    for (int tag :
         new int[] {
           CogTiff.TAG_STRIP_OFFSETS,
           CogTiff.TAG_STRIP_BYTE_COUNTS,
@@ -484,24 +363,12 @@ final class CogOutput {
         data);
   }
 
-  private static List<int[]> planLevels(int width, int height, int block) {
-    List<int[]> levels = new ArrayList<>();
-    int w = width, h = height;
-    while (w > block || h > block) {
-      w = Math.max(1, (w + 1) / 2);
-      h = Math.max(1, (h + 1) / 2);
-      levels.add(new int[] {w, h});
-    }
-    return levels;
-  }
-
   private static long tileCount(int width, int height, int block) {
     return (long) ((width + block - 1) / block) * ((height + block - 1) / block);
   }
 
   private static void checkStopped(BooleanSupplier stopped) throws IOException {
-    if (stopped != null && stopped.getAsBoolean())
-      throw new IOException("Raster write stopped");
+    if (stopped != null && stopped.getAsBoolean()) throw new IOException("Raster write stopped");
   }
 
   /** Monotonic progress over overview generation (0..40%) and assembly (40..100%). */

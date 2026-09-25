@@ -291,6 +291,8 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
           } else {
             options.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
             options.setCompressionType(writeOptions.compression());
+            if ("JPEG".equalsIgnoreCase(writeOptions.compression()))
+              options.setCompressionQuality(writeOptions.jpegQuality() / 100f);
           }
           options.setTilingMode(ImageWriteParam.MODE_EXPLICIT);
           options.setTiling(512, 512);
@@ -306,9 +308,13 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
             scales[b] = src.scale(b);
             offsets[b] = src.offset(b);
             if (!Objects.equals(src.noData(0), src.noData(b)))
-              throw new IllegalArgumentException("GeoTIFF writer requires a common NoData sentinel");
+              throw new IllegalArgumentException(
+                  "GeoTIFF writer requires a common NoData sentinel");
           }
-          GeoTiffOutput.write(
+          GeoTiffOverviews.write(
+              src,
+              writeOptions,
+              stopped,
               temp,
               image,
               src.crs(),
@@ -344,8 +350,7 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
     try {
       var type = Class.forName("it.geosolutions.imageio.plugins.tiff.TIFFImageWriteParam");
       var params = type.getConstructor(java.util.Locale.class).newInstance(new Object[] {null});
-      type.getMethod("setCompressionMode", int.class)
-          .invoke(params, ImageWriteParam.MODE_EXPLICIT);
+      type.getMethod("setCompressionMode", int.class).invoke(params, ImageWriteParam.MODE_EXPLICIT);
       return List.of((String[]) type.getMethod("getCompressionTypes").invoke(params));
     } catch (ReflectiveOperationException | LinkageError unavailableInCallerClassLoader) {
       return KNOWN_TIFF_COMPRESSION_TYPES;

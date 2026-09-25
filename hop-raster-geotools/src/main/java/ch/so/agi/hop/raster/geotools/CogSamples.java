@@ -3,8 +3,8 @@ package ch.so.agi.hop.raster.geotools;
 import java.awt.Rectangle;
 
 /**
- * Read access to one overview level: either the session source or the compressed store of the
- * level below. Windows are limited to the caller's tile size, so memory stays bounded.
+ * Read access to one overview level: either the session source or the compressed store of the level
+ * below. Windows are limited to the caller's tile size, so memory stays bounded.
  */
 interface CogSamples {
   int width();
@@ -19,7 +19,10 @@ interface CogSamples {
 
   boolean valid(double value, int band);
 
-  /** Reads all bands of one window as row-major doubles; window area must fit one tile. */
+  /**
+   * Coordinates are local to this level, starting at (0, 0). Reads all bands of one window as
+   * row-major doubles; window area must fit one tile.
+   */
   double[][] read(int x, int y, int w, int h) throws Exception;
 
   /** Session source; windows must respect the reader's 262144-pixel limit. */
@@ -57,7 +60,10 @@ interface CogSamples {
     public double[][] read(int x, int y, int w, int h) throws Exception {
       double[][] result = new double[source.bands()][];
       for (int band = 0; band < source.bands(); band++) {
-        var raster = source.read(new RasterReadRequest(new Rectangle(x, y, w, h), band));
+        var raster =
+            source.read(
+                new RasterReadRequest(
+                    new Rectangle(source.bounds().x + x, source.bounds().y + y, w, h), band));
         result[band] =
             raster.getSamples(raster.getMinX(), raster.getMinY(), w, h, 0, (double[]) null);
       }
