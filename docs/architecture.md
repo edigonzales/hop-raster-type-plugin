@@ -48,8 +48,12 @@ neighbours and retains scale/offset. NoData, alpha and color interpretation are 
 Clip defaults to all bands. Ordered explicit subsets become numeric unless they retain the complete
 original color layout. Polygon RGB clips add alpha when needed; existing alpha is preserved/masked.
 Palette masks require a representable NoData index. GeoTIFF output requires a common TIFF NoData
-sentinel for numeric bands. Outputs retain DEFLATE, 512-pixel tiles and BigTIFF selection; they are
-not advertised as newly generated COGs.
+sentinel for numeric bands. Outputs retain DEFLATE, 512-pixel tiles and BigTIFF selection. A COG
+request additionally writes internal overviews, IFDs and tag values before the tile data, overview
+data before the main image, a GDAL structural-metadata ghost area and block leaders/trailers.
+Overviews are generated into compressed temporary stores that are removed after the write; the
+temporary footprint stays proportional to the overview data and never materializes a second copy
+of the main image.
 
 Only the writer materializes raster files. It uses a temporary sibling of the destination and
 publishes it after success. It rejects writing to the original source, including hard-link aliases.
