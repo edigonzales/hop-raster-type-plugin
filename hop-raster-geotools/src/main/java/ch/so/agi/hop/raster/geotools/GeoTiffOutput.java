@@ -72,25 +72,73 @@ final class GeoTiffOutput {
       GeoTiffWriteParams options,
       IntConsumer progress)
       throws Exception {
-    var encoder = new CRS2GeoTiffMetadataAdapter(crs).parseCoordinateReferenceSystem();
-    var transform = new AffineTransform(gridToWorld);
-    // GeoTIFF indices start at zero and refer to the upper-left pixel corner.
-    transform.translate(image.getMinX() - .5, image.getMinY() - .5);
-    encoder.addGeoShortParam(
-        GeoTiffConstants.GTRasterTypeGeoKey, GeoTiffConstants.RasterPixelIsArea);
-    encoder.setModelTransformation(transform);
-    if (noData != null) encoder.setNoData(noData);
+    var directory =
+        directory(
+            ImageTypeSpecifier.createFromRenderedImage(image),
+            image.getSampleModel().getNumBands(),
+            image.getSampleModel().getDataType(),
+            image.getMinX(),
+            image.getMinY(),
+            crs,
+            gridToWorld,
+            scales,
+            offsets,
+            noData,
+            color,
+            options);
     var writer = new TIFFImageWriterSpi().createWriterInstance();
     IIOWriteProgressListener listener = progressListener(progress);
     writer.addIIOWriteProgressListener(listener);
     try (var stream = new FileImageOutputStream(file.toFile())) {
       var params = (TIFFImageWriteParam) options.getAdaptee();
+      writer.setOutput(stream);
+      writer.write(
+          writer.getDefaultStreamMetadata(params),
+          new IIOImage(image, null, directory.getAsMetadata()),
+          params);
+    } finally {
+      writer.removeIIOWriteProgressListener(listener);
+      writer.dispose();
+    }
+    // ImageIO reconstructs ColorMap from IndexColorModel's 8-bit components during write,
+    // overriding supplied metadata. Restore the original UInt16 entries in the temporary file.
+    if (color.kind() == RasterColorInfo.Kind.PALETTE)
+      restorePalette(file, color.colorMap(), image.getSampleModel().getDataType());
+  }
+
+  /**
+   * GeoTIFF directory with explicit tags for raw samples, colors, alpha, NoData and scale/offset.
+   * Shared by the ImageIO-backed GeoTIFF writer and the COG writer.
+   */
+  static TIFFDirectory directory(
+      ImageTypeSpecifier type,
+      int bands,
+      int dataType,
+      int minX,
+      int minY,
+      CoordinateReferenceSystem crs,
+      AffineTransform gridToWorld,
+      double[] scales,
+      double[] offsets,
+      Double noData,
+      RasterColorInfo color,
+      GeoTiffWriteParams options)
+      throws Exception {
+    var encoder = new CRS2GeoTiffMetadataAdapter(crs).parseCoordinateReferenceSystem();
+    var transform = new AffineTransform(gridToWorld);
+    // GeoTIFF indices start at zero and refer to the upper-left pixel corner.
+    transform.translate(minX - .5, minY - .5);
+    encoder.addGeoShortParam(
+        GeoTiffConstants.GTRasterTypeGeoKey, GeoTiffConstants.RasterPixelIsArea);
+    encoder.setModelTransformation(transform);
+    if (noData != null) encoder.setNoData(noData);
+    var writer = new TIFFImageWriterSpi().createWriterInstance();
+    try {
+      var params = (TIFFImageWriteParam) options.getAdaptee();
       params.setForceToBigTIFF(options.isForceToBigTIFF());
       var metadata =
-          GeoTiffWriter.createGeoTiffIIOMetadata(
-              writer, ImageTypeSpecifier.createFromRenderedImage(image), encoder, params);
+          GeoTiffWriter.createGeoTiffIIOMetadata(writer, type, encoder, params);
       var directory = TIFFDirectory.createFromMetadata(metadata);
-      int bands = image.getSampleModel().getNumBands();
       int photo =
           switch (color.kind()) {
             case RGB -> 2;
@@ -108,7 +156,7 @@ final class GeoTiffOutput {
       }
       if (photo == 3) {
         char[] original = color.colorMap();
-        int size = 1 << DataBuffer.getDataTypeSize(image.getSampleModel().getDataType());
+        int size = 1 << DataBuffer.getDataTypeSize(dataType);
         char[] palette = new char[size * 3];
         int entries = original.length / 3;
         for (int channel = 0; channel < 3; channel++)
@@ -139,19 +187,10 @@ final class GeoTiffOutput {
                 1,
                 new String[] {xml.toString()}));
       }
-      writer.setOutput(stream);
-      writer.write(
-          writer.getDefaultStreamMetadata(params),
-          new IIOImage(image, null, directory.getAsMetadata()),
-          params);
+      return directory;
     } finally {
-      writer.removeIIOWriteProgressListener(listener);
       writer.dispose();
     }
-    // ImageIO reconstructs ColorMap from IndexColorModel's 8-bit components during write,
-    // overriding supplied metadata. Restore the original UInt16 entries in the temporary file.
-    if (color.kind() == RasterColorInfo.Kind.PALETTE)
-      restorePalette(file, color.colorMap(), image.getSampleModel().getDataType());
   }
 
   private static IIOWriteProgressListener progressListener(IntConsumer progress) {

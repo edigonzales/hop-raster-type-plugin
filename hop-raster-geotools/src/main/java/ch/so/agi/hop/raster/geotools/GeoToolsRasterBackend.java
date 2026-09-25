@@ -245,8 +245,18 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
       String compression,
       IntConsumer progress)
       throws Exception {
-    String selectedCompression =
-        compression == null || compression.isBlank() ? "Deflate" : compression;
+    write(value, target, overwrite, stopped, RasterWriteOptions.geoTiff(compression), progress);
+  }
+
+  @Override
+  public void write(
+      RasterDataset value,
+      Path target,
+      boolean overwrite,
+      BooleanSupplier stopped,
+      RasterWriteOptions writeOptions,
+      IntConsumer progress)
+      throws Exception {
     Path output = target.toAbsolutePath().normalize();
     if (!value.source().remote()) {
       var original = Path.of(value.source().location());
@@ -261,44 +271,55 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
       Path temp = Files.createTempFile(output.getParent(), ".hop-raster-", ".tif");
       PlanarImage image = null;
       try {
-        image =
-            src instanceof DerivedSource derived && derived.image() != null
-                ? derived.image()
-                : new SourceImage(src, stopped, session.outputCache);
-        var options = new GeoTiffWriteParams();
-        if ("None".equalsIgnoreCase(selectedCompression)) {
-          options.setCompressionMode(ImageWriteParam.MODE_DISABLED);
+        if (writeOptions.format() == RasterWriteOptions.Format.COG) {
+          boolean bigTiff =
+              (double) src.bounds().width
+                      * src.bounds().height
+                      * src.bands()
+                      * DataBuffer.getDataTypeSize(src.dataType())
+                      / 8
+                  >= 2L * 1024 * 1024 * 1024;
+          CogOutput.write(temp, src, writeOptions, bigTiff, stopped, progress);
         } else {
-          options.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
-          options.setCompressionType(selectedCompression);
+          image =
+              src instanceof DerivedSource derived && derived.image() != null
+                  ? derived.image()
+                  : new SourceImage(src, stopped, session.outputCache);
+          var options = new GeoTiffWriteParams();
+          if ("None".equalsIgnoreCase(writeOptions.compression())) {
+            options.setCompressionMode(ImageWriteParam.MODE_DISABLED);
+          } else {
+            options.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+            options.setCompressionType(writeOptions.compression());
+          }
+          options.setTilingMode(ImageWriteParam.MODE_EXPLICIT);
+          options.setTiling(512, 512);
+          options.setForceToBigTIFF(
+              (double) src.bounds().width
+                      * src.bounds().height
+                      * src.bands()
+                      * DataBuffer.getDataTypeSize(src.dataType())
+                      / 8
+                  >= 2L * 1024 * 1024 * 1024);
+          double[] scales = new double[src.bands()], offsets = new double[src.bands()];
+          for (int b = 0; b < src.bands(); b++) {
+            scales[b] = src.scale(b);
+            offsets[b] = src.offset(b);
+            if (!Objects.equals(src.noData(0), src.noData(b)))
+              throw new IllegalArgumentException("GeoTIFF writer requires a common NoData sentinel");
+          }
+          GeoTiffOutput.write(
+              temp,
+              image,
+              src.crs(),
+              (AffineTransform) src.gridToWorld(),
+              scales,
+              offsets,
+              src.noData(0),
+              src.colorInfo(),
+              options,
+              progress == null ? ignored -> {} : progress);
         }
-        options.setTilingMode(ImageWriteParam.MODE_EXPLICIT);
-        options.setTiling(512, 512);
-        options.setForceToBigTIFF(
-            (double) src.bounds().width
-                    * src.bounds().height
-                    * src.bands()
-                    * DataBuffer.getDataTypeSize(src.dataType())
-                    / 8
-                >= 2L * 1024 * 1024 * 1024);
-        double[] scales = new double[src.bands()], offsets = new double[src.bands()];
-        for (int b = 0; b < src.bands(); b++) {
-          scales[b] = src.scale(b);
-          offsets[b] = src.offset(b);
-          if (!Objects.equals(src.noData(0), src.noData(b)))
-            throw new IllegalArgumentException("GeoTIFF writer requires a common NoData sentinel");
-        }
-        GeoTiffOutput.write(
-            temp,
-            image,
-            src.crs(),
-            (AffineTransform) src.gridToWorld(),
-            scales,
-            offsets,
-            src.noData(0),
-            src.colorInfo(),
-            options,
-            progress == null ? ignored -> {} : progress);
         if (stopped.getAsBoolean()) throw new java.io.IOException("Raster write stopped");
         if (overwrite) Files.move(temp, output, StandardCopyOption.REPLACE_EXISTING);
         else Files.move(temp, output);
@@ -329,6 +350,11 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
     } catch (ReflectiveOperationException | LinkageError unavailableInCallerClassLoader) {
       return KNOWN_TIFF_COMPRESSION_TYPES;
     }
+  }
+
+  /** Lossless compression names supported by COG output; callers add the uncompressed mode. */
+  public static List<String> cogCompressionTypes() {
+    return List.of("Deflate", "ZLib", "LZW", "ZSTD", "PackBits");
   }
 
   private static final class SourceImage extends SourcelessOpImage {
