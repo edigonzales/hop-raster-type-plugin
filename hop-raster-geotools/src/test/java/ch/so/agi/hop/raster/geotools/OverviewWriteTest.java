@@ -104,9 +104,21 @@ class OverviewWriteTest {
           params,
           ignored -> {});
     } finally {
-      coverage.dispose(true);
-      reader.dispose();
+      try {
+        // ImageRead owns additional streams; disposing the coverage alone leaves
+        // input.tif locked on Windows, just as in GeoTiffSource.readWindow.
+        org.geotools.image.util.ImageUtilities.disposePlanarImageChain(
+            org.eclipse.imagen.PlanarImage.wrapRenderedImage(coverage.getRenderedImage()));
+      } finally {
+        try {
+          coverage.dispose(true);
+        } finally {
+          reader.dispose();
+        }
+      }
     }
+    // Check the input handle is released before JUnit's temporary-directory cleanup.
+    Files.delete(input);
     byte[] header = Files.readAllBytes(output);
     assertThat((header[2] & 255) == 43 || (header[3] & 255) == 43).isTrue();
     try (var stream = ImageIO.createImageInputStream(output.toFile())) {
