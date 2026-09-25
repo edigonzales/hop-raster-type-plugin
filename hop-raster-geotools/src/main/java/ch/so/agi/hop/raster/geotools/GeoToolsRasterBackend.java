@@ -354,7 +354,7 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
 
   /** Lossless compression names supported by COG output; callers add the uncompressed mode. */
   public static List<String> cogCompressionTypes() {
-    return List.of("Deflate", "ZLib", "LZW", "ZSTD", "PackBits");
+    return List.of("Deflate", "ZLib", "LZW", "ZSTD", "PackBits", "JPEG");
   }
 
   private static final class SourceImage extends SourcelessOpImage {

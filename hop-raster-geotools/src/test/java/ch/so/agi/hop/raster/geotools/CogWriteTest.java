@@ -166,13 +166,25 @@ class CogWriteTest {
               () ->
                   backend.write(
                       dataset,
-                      dir.resolve("jpeg.tif"),
+                      dir.resolve("unsupported.tif"),
+                      false,
+                      () -> false,
+                      RasterWriteOptions.cog("EXIF JPEG"),
+                      ignored -> {}))
+          .isInstanceOf(IOException.class)
+          .hasMessageContaining("COG output supports");
+      // JPEG is a valid COG codec, but not for this 32-bit float raster.
+      assertThatThrownBy(
+              () ->
+                  backend.write(
+                      dataset,
+                      dir.resolve("jpeg-float.tif"),
                       false,
                       () -> false,
                       RasterWriteOptions.cog("JPEG"),
                       ignored -> {}))
           .isInstanceOf(IOException.class)
-          .hasMessageContaining("COG output supports");
+          .hasMessageContaining("JPEG COG supports 8-bit rasters only");
     }
     assertThat(temporaryFiles()).isEmpty();
   }

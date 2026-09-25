@@ -93,8 +93,57 @@ public final class WriteVolumeProbe {
     }
     if (!Files.exists(cog)) throw new AssertionError("COG output missing");
     long cogSize = Files.size(cog);
-    long temporary = 0;
-    try (var input = new RecordingFile(out.resolve("writes-cog.jfr"))) {
+    long temporary = temporaryWrites(out, out.resolve("writes-cog.jfr"));
+    if (temporary <= 0) throw new AssertionError("COG wrote no temporary files");
+    if (temporary > 2 * cogSize)
+      throw new AssertionError(
+          "COG temporary write volume " + temporary + " exceeds twice " + cogSize);
+    System.out.println("COG_TEMPORARY_BYTES " + temporary + " OF " + cogSize);
+
+    // JPEG COG: the lossless cascade store dominates the temporary volume for lossy output, so
+    // the budget is wider than for lossless codecs.
+    Path jpegCog = out.resolve("chain").resolve("cog-jpeg.tif");
+    try (var recording = new Recording()) {
+      recording.enable("jdk.FileWrite").withThreshold(Duration.ZERO).withoutStackTrace();
+      recording.start();
+      try (var backend = new GeoToolsRasterBackend()) {
+        var value = backend.describe(fixtures.resolve("rgb.tif").toString());
+        backend.write(
+            value,
+            jpegCog,
+            false,
+            () -> false,
+            new RasterWriteOptions(
+                RasterWriteOptions.Format.COG,
+                RasterWriteOptions.Overviews.AUTO,
+                RasterWriteOptions.Resampling.AVERAGE,
+                512,
+                "JPEG",
+                75),
+            ignored -> {});
+      }
+      recording.stop();
+      recording.dump(out.resolve("writes-jpeg.jfr"));
+    }
+    if (!Files.exists(jpegCog)) throw new AssertionError("JPEG COG output missing");
+    long jpegSize = Files.size(jpegCog);
+    long jpegTemporary = temporaryWrites(out, out.resolve("writes-jpeg.jfr"));
+    if (jpegTemporary <= 0) throw new AssertionError("JPEG COG wrote no temporary files");
+    if (jpegTemporary > 3 * jpegSize)
+      throw new AssertionError(
+          "JPEG COG temporary write volume " + jpegTemporary + " exceeds three times " + jpegSize);
+    System.out.println("COG_JPEG_TEMPORARY_BYTES " + jpegTemporary + " OF " + jpegSize);
+
+    try (var paths = Files.walk(out)) {
+      if (paths.anyMatch(p -> p.getFileName().toString().startsWith(".hop-raster-")))
+        throw new AssertionError("Temporary COG output remains");
+    }
+    System.out.println("WRITE_VOLUME_PASS");
+  }
+
+  private static long temporaryWrites(Path out, Path recording) throws Exception {
+    long total = 0;
+    try (var input = new RecordingFile(recording)) {
       while (input.hasMoreEvents()) {
         var event = input.readEvent();
         if (!event.getEventType().getName().equals("jdk.FileWrite")) continue;
@@ -103,18 +152,9 @@ public final class WriteVolumeProbe {
         Path resolved = Path.of(path).toAbsolutePath();
         if (!resolved.startsWith(out.resolve("chain"))) continue;
         if (!resolved.getFileName().toString().startsWith(".hop-raster-")) continue;
-        temporary += event.getLong("bytesWritten");
+        total += event.getLong("bytesWritten");
       }
     }
-    if (temporary <= 0) throw new AssertionError("COG wrote no temporary files");
-    if (temporary > 2 * cogSize)
-      throw new AssertionError(
-          "COG temporary write volume " + temporary + " exceeds twice " + cogSize);
-    try (var paths = Files.walk(out)) {
-      if (paths.anyMatch(p -> p.getFileName().toString().startsWith(".hop-raster-")))
-        throw new AssertionError("Temporary COG output remains");
-    }
-    System.out.println("COG_TEMPORARY_BYTES " + temporary + " OF " + cogSize);
-    System.out.println("WRITE_VOLUME_PASS");
+    return total;
   }
 }

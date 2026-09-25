@@ -26,7 +26,7 @@ import javax.imageio.stream.MemoryCacheImageOutputStream;
  * writer drives the same codec classes as the plain GeoTIFF writer, so tile bytes and compression
  * tags stay compatible. JPEG and CCITT remain exclusive to plain GeoTIFF output.
  */
-final class CogTileCodec implements AutoCloseable {
+final class CogTileCodec implements CogCodec {
   private final String name;
   private final int tag;
   private final int bands;
@@ -101,16 +101,24 @@ final class CogTileCodec implements AutoCloseable {
     };
   }
 
-  String name() {
+  @Override
+  public String name() {
     return name;
   }
 
-  int tag() {
+  @Override
+  public boolean lossless() {
+    return true;
+  }
+
+  @Override
+  public int tag() {
     return tag;
   }
 
   /** Compresses one padded tile and returns the byte count. */
-  int encode(ImageOutputStream stream, byte[] raw, int width, int height, int stride)
+  @Override
+  public int encode(ImageOutputStream stream, byte[] raw, int width, int height, int stride)
       throws IOException {
     compressor.setStream(stream);
     return compressor.encode(raw, 0, width, height, bitsPerSample, stride);

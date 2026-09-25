@@ -36,6 +36,9 @@ final class CogOutput {
 
   private CogOutput() {}
 
+  /** One overview level: the lossless cascade store and the blocks for the output file. */
+  private record Level(CogBlockStore lossless, CogBlockStore output) {}
+
   static void write(
       Path target,
       RasterSource source,
@@ -74,87 +77,120 @@ final class CogOutput {
             ? RasterWriteOptions.Resampling.NEAREST
             : options.resampling();
 
-    List<int[]> levels =
+    List<int[]> planned =
         options.overviews() == RasterWriteOptions.Overviews.AUTO
             ? planLevels(bounds.width, bounds.height, block)
             : List.of();
     long overviewTiles = 0;
-    for (int[] level : levels) overviewTiles += tileCount(level[0], level[1], block);
+    for (int[] level : planned) overviewTiles += tileCount(level[0], level[1], block);
     long mainTiles = tileCount(bounds.width, bounds.height, block);
     Work work = new Work(progress, overviewTiles, overviewTiles + mainTiles);
 
-    try (CogTileCodec codec = CogTileCodec.create(options.compression(), bands, bits, formats)) {
-      List<CogBlockStore> stores = new ArrayList<>();
-      try {
-        CogSamples previous = new CogSamples.Source(source);
-        Double[] noDataByBand = new Double[bands];
-        Arrays.fill(noDataByBand, noData);
-        for (int[] level : levels) {
-          checkStopped(stopped);
-          CogBlockStore store =
-              generate(
-                  previous,
-                  level,
-                  resampling,
-                  block,
-                  bands,
-                  dataType,
-                  noDataByBand,
-                  codec,
-                  target.getParent(),
-                  stopped,
-                  work);
-          stores.add(store);
-          previous =
-              new CogSamples.Store(
-                  store, level[0], level[1], dataType, bands, noDataByBand, block, codec);
-        }
-
-        CogTiff.Directory main =
-            mainDirectory(
-                source, color, dataType, bands, bounds, gridToWorld, scales, offsets, noData, block,
-                bigTiff, codec);
-        main.tileOffsets = new long[(int) mainTiles];
-        main.tileByteCounts = new long[(int) mainTiles];
-        List<CogTiff.Directory> directories = new ArrayList<>();
-        List<CogTiff.Directory> overviewDirectories = new ArrayList<>();
-        directories.add(main);
-        for (int[] level : levels) {
-          CogTiff.Directory directory = main.copy();
-          patchOverview(directory, level[0], level[1], block);
-          directory.tileOffsets = new long[(int) tileCount(level[0], level[1], block)];
-          directory.tileByteCounts = new long[directory.tileOffsets.length];
-          directories.add(directory);
-          overviewDirectories.add(directory);
-        }
-
-        String ghost =
-            String.format(
-                    Locale.ROOT, "GDAL_STRUCTURAL_METADATA_SIZE=%06d bytes\n", GHOST_TEXT.length())
-                + GHOST_TEXT;
-        try (CogTiff tiff = new CogTiff(target, bigTiff, directories, ghost)) {
-          tiff.open();
-          byte[] compressed = new byte[1024];
-          for (int level = stores.size() - 1; level >= 0; level--) {
-            CogBlockStore store = stores.get(level);
-            CogTiff.Directory directory = overviewDirectories.get(level);
-            for (int tile = 0; tile < store.size(); tile++) {
-              checkStopped(stopped);
-              int length = store.length(tile);
-              if (compressed.length < length) compressed = new byte[length];
-              store.read(tile, compressed);
-              long offset = tiff.writeBlock(compressed, length);
-              directory.tileOffsets[tile] = offset;
-              directory.tileByteCounts[tile] = length;
-              work.assembled();
-            }
-          }
-          writeMainImage(tiff, source, main, block, bands, dataType, codec, stopped, work);
-          tiff.writeFrontArea();
-        }
-      } finally {
-        for (CogBlockStore store : stores) store.close();
+    CogCodec outputCodec = null;
+    CogTileCodec storeCodec = null;
+    boolean splitCodecs = "JPEG".equalsIgnoreCase(options.compression());
+    if (splitCodecs) {
+      outputCodec = CogJpegCodec.create(options.jpegQuality(), bands, dataType, color);
+      // The cascade must stay lossless; JPEG would compound its loss on every level.
+      storeCodec = CogTileCodec.create("Deflate", bands, bits, formats);
+    } else {
+      outputCodec = CogTileCodec.create(options.compression(), bands, bits, formats);
+      storeCodec = (CogTileCodec) outputCodec;
+    }
+    List<Level> levels = new ArrayList<>();
+    try {
+      // The IFDs are built first: the JPEG codec needs its directory metadata before the first
+      // tile is encoded, and the overview directories only depend on the main one.
+      CogTiff.Directory main =
+          mainDirectory(
+              source,
+              color,
+              dataType,
+              bands,
+              bounds,
+              gridToWorld,
+              scales,
+              offsets,
+              noData,
+              block,
+              bigTiff,
+              outputCodec,
+              splitCodecs ? (CogJpegCodec) outputCodec : null);
+      main.tileOffsets = new long[(int) mainTiles];
+      main.tileByteCounts = new long[(int) mainTiles];
+      List<CogTiff.Directory> directories = new ArrayList<>();
+      List<CogTiff.Directory> overviewDirectories = new ArrayList<>();
+      directories.add(main);
+      for (int[] level : planned) {
+        CogTiff.Directory directory = main.copy();
+        patchOverview(directory, level[0], level[1], block);
+        directory.tileOffsets = new long[(int) tileCount(level[0], level[1], block)];
+        directory.tileByteCounts = new long[directory.tileOffsets.length];
+        directories.add(directory);
+        overviewDirectories.add(directory);
       }
+
+      CogSamples previous = new CogSamples.Source(source);
+      Double[] noDataByBand = new Double[bands];
+      Arrays.fill(noDataByBand, noData);
+      for (int index = 0; index < planned.size(); index++) {
+        int[] dims = planned.get(index);
+        checkStopped(stopped);
+        Level level =
+            generate(
+                previous,
+                dims,
+                resampling,
+                block,
+                bands,
+                dataType,
+                noDataByBand,
+                storeCodec,
+                splitCodecs ? (CogJpegCodec) outputCodec : null,
+                target.getParent(),
+                stopped,
+                work);
+        levels.add(level);
+        if (index > 0) {
+          Level parent = levels.get(index - 1);
+          if (parent.lossless() != parent.output()) parent.lossless().close();
+        }
+        previous =
+            new CogSamples.Store(
+                level.lossless(), dims[0], dims[1], dataType, bands, noDataByBand, block, storeCodec);
+      }
+
+      String ghost =
+          String.format(
+                  Locale.ROOT, "GDAL_STRUCTURAL_METADATA_SIZE=%06d bytes\n", GHOST_TEXT.length())
+              + GHOST_TEXT;
+      try (CogTiff tiff = new CogTiff(target, bigTiff, directories, ghost)) {
+        tiff.open();
+        byte[] compressed = new byte[1024];
+        for (int level = levels.size() - 1; level >= 0; level--) {
+          CogBlockStore store = levels.get(level).output();
+          CogTiff.Directory directory = overviewDirectories.get(level);
+          for (int tile = 0; tile < store.size(); tile++) {
+            checkStopped(stopped);
+            int length = store.length(tile);
+            if (compressed.length < length) compressed = new byte[length];
+            store.read(tile, compressed);
+            long offset = tiff.writeBlock(compressed, length);
+            directory.tileOffsets[tile] = offset;
+            directory.tileByteCounts[tile] = length;
+            work.assembled();
+          }
+        }
+        writeMainImage(tiff, source, main, block, bands, dataType, outputCodec, stopped, work);
+        tiff.writeFrontArea();
+      }
+    } finally {
+      for (Level level : levels) {
+        level.output().close();
+        if (level.lossless() != level.output()) level.lossless().close();
+      }
+      if (outputCodec != null && outputCodec != storeCodec) outputCodec.close();
+      if (storeCodec != null) storeCodec.close();
     }
     if (progress != null) progress.accept(100);
   }
@@ -166,7 +202,7 @@ final class CogOutput {
       int block,
       int bands,
       int dataType,
-      CogTileCodec codec,
+      CogTileEncoder encoder,
       BooleanSupplier stopped,
       Work work)
       throws Exception {
@@ -198,7 +234,7 @@ final class CogOutput {
         buffer.reset();
         int length;
         try (var stream = buffer.open()) {
-          length = codec.encode(stream, raw, block, block, block * bands * bytes);
+          length = encoder.encode(stream, raw, block, block, block * bands * bytes);
         }
         long offset = tiff.writeBlock(buffer.data(), length);
         directory.tileOffsets[tile] = offset;
@@ -209,8 +245,11 @@ final class CogOutput {
     }
   }
 
-  /** Generates one overview level into a compressed temporary store. */
-  private static CogBlockStore generate(
+  /**
+   * Generates one overview level. The lossless store feeds the next level; the output store holds
+   * the blocks for the final file and is only separate when the output codec is lossy.
+   */
+  private static Level generate(
       CogSamples previous,
       int[] dims,
       RasterWriteOptions.Resampling resampling,
@@ -218,7 +257,8 @@ final class CogOutput {
       int bands,
       int dataType,
       Double[] noData,
-      CogTileCodec codec,
+      CogTileCodec storeCodec,
+      CogJpegCodec jpeg,
       Path directory,
       BooleanSupplier stopped,
       Work work)
@@ -227,20 +267,26 @@ final class CogOutput {
     int across = (width + block - 1) / block;
     int down = (height + block - 1) / block;
     CogBlockStore store = CogBlockStore.create(directory, ".hop-raster-ovr-", across * down);
+    CogBlockStore output =
+        jpeg == null
+            ? store
+            : CogBlockStore.create(directory, ".hop-raster-jpeg-", across * down);
     try {
       int bytes = CogTile.sampleBytes(dataType);
+      int stride = block * bands * bytes;
       byte[] raw = new byte[block * block * bands * bytes];
-      double[][] output = new double[bands][block * block];
+      double[][] outputPixels = new double[bands][block * block];
       double[][] sums = new double[bands][block * block];
       int[][] counts = new int[bands][block * block];
       boolean average = resampling == RasterWriteOptions.Resampling.AVERAGE;
-      CogTileBuffer buffer = new CogTileBuffer();
+      CogTileBuffer storeBuffer = new CogTileBuffer();
+      CogTileBuffer outputBuffer = new CogTileBuffer();
       for (int ty = 0; ty < down; ty++) {
         for (int tx = 0; tx < across; tx++) {
           checkStopped(stopped);
           int originX = tx * 2 * block, originY = ty * 2 * block;
           for (int band = 0; band < bands; band++) {
-            Arrays.fill(output[band], 0);
+            Arrays.fill(outputPixels[band], 0);
             if (average) {
               Arrays.fill(sums[band], 0);
               Arrays.fill(counts[band], 0);
@@ -270,7 +316,7 @@ final class CogOutput {
                     for (int column = ((sx & 1) == 0 ? 0 : 1); column < sw; column += 2) {
                       int ox = (sx + column) / 2 - tx * block;
                       int oy = (sy + row) / 2 - ty * block;
-                      output[band][oy * block + ox] = input[band][row * sw + column];
+                      outputPixels[band][oy * block + ox] = input[band][row * sw + column];
                     }
                   }
                 }
@@ -281,29 +327,38 @@ final class CogOutput {
             for (int band = 0; band < bands; band++) {
               for (int pixel = 0; pixel < block * block; pixel++) {
                 if (counts[band][pixel] == 0) {
-                  output[band][pixel] = invalid(noData[band], dataType);
+                  outputPixels[band][pixel] = invalid(noData[band], dataType);
                 } else {
                   double value = sums[band][pixel] / counts[band][pixel];
                   if (dataType != DataBuffer.TYPE_FLOAT && dataType != DataBuffer.TYPE_DOUBLE)
                     value = Math.rint(value);
-                  output[band][pixel] = value;
+                  outputPixels[band][pixel] = value;
                 }
               }
             }
           }
-          CogTile.pack(output, block, bands, dataType, raw);
-          buffer.reset();
+          CogTile.pack(outputPixels, block, bands, dataType, raw);
+          storeBuffer.reset();
           int length;
-          try (var stream = buffer.open()) {
-            length = codec.encode(stream, raw, block, block, block * bands * bytes);
+          try (var stream = storeBuffer.open()) {
+            length = storeCodec.encode(stream, raw, block, block, stride);
           }
-          store.append(buffer.data(), length);
+          store.append(storeBuffer.data(), length);
+          if (jpeg != null) {
+            outputBuffer.reset();
+            int outputLength;
+            try (var stream = outputBuffer.open()) {
+              outputLength = jpeg.encode(stream, raw, block, block, stride);
+            }
+            output.append(outputBuffer.data(), outputLength);
+          }
           work.overview();
         }
       }
-      return store;
+      return new Level(store, output);
     } catch (Exception e) {
       store.close();
+      if (output != store) output.close();
       throw e;
     }
   }
@@ -326,7 +381,8 @@ final class CogOutput {
       Double noData,
       int block,
       boolean bigTiff,
-      CogTileCodec codec)
+      CogCodec codec,
+      CogJpegCodec jpeg)
       throws Exception {
     GeoTiffWriteParams writeParams = new GeoTiffWriteParams();
     if ("None".equalsIgnoreCase(codec.name())) {
@@ -355,9 +411,9 @@ final class CogOutput {
             noData,
             color,
             writeParams);
+    if (jpeg != null) metadata = jpeg.prepareDirectory(metadata);
     CogTiff.Directory directory = new CogTiff.Directory();
-    for (TIFFField field : metadata.getTIFFFields()) directory.set(field);
-    for (int tag :
+    for (TIFFField field : metadata.getTIFFFields()) directory.set(field);    for (int tag :
         new int[] {
           CogTiff.TAG_STRIP_OFFSETS,
           CogTiff.TAG_STRIP_BYTE_COUNTS,
@@ -379,6 +435,15 @@ final class CogOutput {
     directory.set(shorts(CogTiff.TAG_BITS_PER_SAMPLE, bits));
     directory.set(shorts(CogTiff.TAG_SAMPLE_FORMAT, formats));
     directory.set(shorts(CogTiff.TAG_SAMPLES_PER_PIXEL, bands));
+    if (jpeg != null) {
+      byte[] tables = jpeg.tables();
+      directory.set(
+          new TIFFField(
+              it.geosolutions.imageio.plugins.tiff.BaselineTIFFTagSet.getInstance().getTag(347),
+              TIFFTag.TIFF_UNDEFINED,
+              tables.length,
+              tables));
+    }
     return directory;
   }
 
@@ -462,8 +527,7 @@ final class CogOutput {
 
     void assembled() {
       assemblyDone++;
-      int value =
-          (int) Math.min(100, 40 + 60 * assemblyDone / Math.max(1, assemblyTotal));
+      int value = (int) Math.min(100, 40 + 60 * assemblyDone / Math.max(1, assemblyTotal));
       report(value);
     }
 
