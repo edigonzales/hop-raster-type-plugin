@@ -106,6 +106,9 @@ jobs:
               for entry in z.infolist():
                   p=Path('.ci/hop')/entry.filename
                   if p.is_file() and entry.external_attr >> 16: p.chmod(entry.external_attr >> 16)
+      - name: Install companion test dependencies
+        if: hashFiles('scripts/requirements-test.txt') != ''
+        run: python -m pip install -r scripts/requirements-test.txt
       - name: Installed integration
         run: python scripts/run-installed-e2e.py --hop-home .ci/hop/hop --plugin-zip .ci/inputs/vector.zip --geometry-zip .ci/inputs/geometry.zip --raster-type-zip .ci/inputs/raster.zip --work-dir .ci/results
       - uses: actions/upload-artifact@v4
