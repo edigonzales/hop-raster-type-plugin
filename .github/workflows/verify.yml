@@ -5,9 +5,8 @@ permissions:
   contents: read
 jobs:
   build:
-    uses: edigonzales/hop-plugin-ci/.github/workflows/plugin-verify.yml@990af4813013fa8d21f6447e7545ed5499f2f202
+    uses: edigonzales/hop-plugin-ci/.github/workflows/verify.yml@f0a1eec368cb8c5d2592086b26393a6fc3916ad1
     with:
-      ci-ref: 990af4813013fa8d21f6447e7545ed5499f2f202
       java-versions: '["21", "25"]'
       runner-os: '["ubuntu-latest", "macos-15", "windows-latest"]'
       canonical-runner-os: ubuntu-latest
@@ -15,11 +14,13 @@ jobs:
       maven-goals: clean verify
       compatibility-goals: test
       pom-file: assemblies/pom.xml
-      zip-glob: assemblies/target/hop-raster-type-plugin-*.zip
-      plugin-root: plugins/misc/hop-raster-type
       artifact-name-prefix: hop-raster-type-plugin
-      group-id: ch.so.agi
-      artifact-id: hop-raster-type-plugin
-      hop-version: 2.19.0
-      validation-commands: '["python -m unittest discover -s scripts -p test_*.py", "python scripts/verify-package.py", "python scripts/stage-artifacts.py"]'
-      additional-verified-files: '["pom.xml", "target/publication/hop-raster-core.pom", "target/publication/hop-raster-core-0.1.0-SNAPSHOT.jar", "target/publication/hop-raster-type.pom", "target/publication/hop-raster-type-0.1.0-SNAPSHOT.jar", "target/publication/hop-raster-geotools.pom", "target/publication/hop-raster-geotools-0.1.0-SNAPSHOT.jar"]'
+      artifacts: >-
+        [{"pom":"pom.xml"},
+         {"file":"assemblies/target/hop-raster-type-plugin-*.zip","pom":"assemblies/pom.xml"},
+         {"file":"hop-raster-core/target/hop-raster-core-*-SNAPSHOT.jar","pom":"hop-raster-core/pom.xml"},
+         {"file":"hop-raster-type/target/hop-raster-type-*-SNAPSHOT.jar","pom":"hop-raster-type/pom.xml"},
+         {"file":"hop-raster-geotools/target/hop-raster-geotools-*-SNAPSHOT.jar","pom":"hop-raster-geotools/pom.xml"}]
+      validation-command: |
+        python -m unittest discover -s scripts -p test_*.py
+        python scripts/verify-package.py

@@ -18,15 +18,10 @@ jobs:
   publish:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [verify, installed-e2e]
-    uses: edigonzales/hop-plugin-ci/.github/workflows/plugin-publish.yml@990af4813013fa8d21f6447e7545ed5499f2f202
+    uses: edigonzales/hop-plugin-ci/.github/workflows/publish.yml@f0a1eec368cb8c5d2592086b26393a6fc3916ad1
     with:
-      ci-ref: 990af4813013fa8d21f6447e7545ed5499f2f202
       repository-kind: snapshot
       verified-artifact-name: hop-raster-type-plugin-canonical
-      pom-file: assemblies/pom.xml
-      artifact-id: hop-raster-type-plugin
-      plugin-root: plugins/misc/hop-raster-type
-      extra-maven-artifacts: '[{"file": ".ci/publish/pom.xml", "pom-file": ".ci/publish/pom.xml", "packaging": "pom"}, {"file": ".ci/publish/hop-raster-core-0.1.0-SNAPSHOT.jar", "pom-file": ".ci/publish/hop-raster-core.pom", "packaging": "jar"}, {"file": ".ci/publish/hop-raster-type-0.1.0-SNAPSHOT.jar", "pom-file": ".ci/publish/hop-raster-type.pom", "packaging": "jar"}, {"file": ".ci/publish/hop-raster-geotools-0.1.0-SNAPSHOT.jar", "pom-file": ".ci/publish/hop-raster-geotools.pom", "packaging": "jar"}]'
     secrets:
       MAVEN_USERNAME: ${{ secrets.INTERLIS_MAVEN_USERNAME }}
       MAVEN_PASSWORD: ${{ secrets.INTERLIS_MAVEN_TOKEN }}
@@ -48,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: edigonzales/hop-plugin-ci
-          ref: 990af4813013fa8d21f6447e7545ed5499f2f202
+          ref: f0a1eec368cb8c5d2592086b26393a6fc3916ad1
           path: .ci/hop-plugin-ci
       - uses: actions/setup-java@v4
         with:
@@ -57,7 +52,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: hop-raster-type-plugin-canonical
           path: .ci/canonical
@@ -111,6 +106,9 @@ jobs:
               for entry in z.infolist():
                   p=Path('.ci/hop')/entry.filename
                   if p.is_file() and entry.external_attr >> 16: p.chmod(entry.external_attr >> 16)
+      - name: Install companion test dependencies
+        if: hashFiles('scripts/requirements-test.txt') != ''
+        run: python -m pip install -r scripts/requirements-test.txt
       - name: Installed integration
         run: python scripts/run-installed-e2e.py --hop-home .ci/hop/hop --plugin-zip .ci/inputs/vector.zip --geometry-zip .ci/inputs/geometry.zip --raster-type-zip .ci/inputs/raster.zip --work-dir .ci/results
       - uses: actions/upload-artifact@v4
