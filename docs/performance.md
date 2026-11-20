@@ -17,3 +17,13 @@ und Ausgabe.
 Die regulären Maven-Tests prüfen Rasterwerte, NoData, Farbbänder, Fenster,
 HTTP-Range-Zugriffe, COG-Ausgabe und das Aufräumen bei Fehlern. Die CI führt
 zusätzlich die installierten Vector/Raster-Pipelines aus.
+
+Für eine Gegenprobe gegen zwei öffentliche Solothurn-COGs mit Netzwerkzugriff:
+
+```sh
+mvn -s "$MAVEN_SETTINGS" -B -ntp -pl hop-raster-geotools -am test \
+  -Dtest=RemoteCogTest -Dsurefire.failIfNoSpecifiedTests=false -DremoteCogTests=true
+```
+
+Der Test vergleicht Clip und Zonenstatistik am Original und am lokalen Ausschnitt.
+Je Quelle dürfen höchstens 32 MiB übertragen werden.

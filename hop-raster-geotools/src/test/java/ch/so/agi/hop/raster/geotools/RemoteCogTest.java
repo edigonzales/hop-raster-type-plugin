@@ -3,22 +3,21 @@ package ch.so.agi.hop.raster.geotools;
 import static org.assertj.core.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
-/** Opt-in acceptance test against the two public Solothurn datasets. */
+/** Optional check against the two public Solothurn COGs. */
 class RemoteCogTest {
+  @TempDir Path target;
+
   @Test
   void solothurnClipAndStatistics() throws Exception {
     assumeTrue(Boolean.getBoolean("remoteCogTests"), "Enable with -DremoteCogTests=true");
-    Path target = Path.of("target", "cog-smoke");
-    Files.createDirectories(target);
     String[] layers = {
       "ch.swisstopo.lidar_2023.ndsm_buildings", "ch.swisstopo.swissalti3d_2025.dtm"
     };
     for (String layer : layers) {
-      long started = System.nanoTime();
       String url = "https://files.geo.so.ch/" + layer + "/aktuell/" + layer + ".tif";
       try (var source = new GeoTiffSource(new RasterDatasetRef(url))) {
         assertThat(source.bands()).isEqualTo(1);
@@ -36,14 +35,6 @@ class RemoteCogTest {
           assertThat(local.bounds().width).isEqualTo(layer.endsWith("dtm") ? 200 : 400);
         }
         assertThat(source.httpBytesRead()).isLessThan(32L * 1024 * 1024);
-        System.out.printf(
-            "COG %s: count=%d mean=%.9f, %d bytes in %d HTTP requests, %.2f s%n",
-            layer,
-            result.count(),
-            result.mean(),
-            source.httpBytesRead(),
-            source.httpRequests(),
-            (System.nanoTime() - started) / 1e9);
       }
     }
   }
