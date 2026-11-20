@@ -265,7 +265,7 @@ class CogWriteTest {
   @Test
   void supportsColorOrientations() throws Exception {
     Path fixtures = dir.resolve("fixtures");
-    BenchmarkFixtures.main(new String[] {fixtures.toString(), "1024", "variants"});
+    TiledRasterFixtures.write(fixtures, 1024, "rgba", "palette", "numeric4");
     try (var backend = new GeoToolsRasterBackend()) {
       for (String kind : new String[] {"rgba", "palette", "numeric4"}) {
         Path input = fixtures.resolve(kind + ".tif");
@@ -309,7 +309,7 @@ class CogWriteTest {
   @Test
   void ordersMultipleOverviewLevelsSmallestFirst() throws Exception {
     Path fixtures = dir.resolve("fixtures");
-    BenchmarkFixtures.main(new String[] {fixtures.toString(), "2048"});
+    TiledRasterFixtures.write(fixtures, 2048, "dem");
     Path input = fixtures.resolve("dem.tif");
     Path output = dir.resolve("dem-cog.tif");
     try (var backend = new GeoToolsRasterBackend()) {
@@ -388,7 +388,7 @@ class CogWriteTest {
     Path output = dir.resolve("failed.tif");
     try (var backend = new GeoToolsRasterBackend()) {
       var dataset = backend.describe(input.toString());
-      GeoTiffSource raw = (GeoTiffSource) AcceptanceProbe.field(backend, "source");
+      GeoTiffSource raw = (GeoTiffSource) RasterTestSupport.field(backend, "source");
       AtomicInteger calls = new AtomicInteger();
       assertThatThrownBy(
               () ->

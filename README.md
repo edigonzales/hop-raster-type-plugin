@@ -39,7 +39,7 @@ Build Vector/Raster afterwards. Its `scripts/run-installed-e2e.py` accepts
 `--raster-type-zip` in addition to the Geometry and Vector/Raster ZIPs.
 
 See [architecture](docs/architecture.md), [migration](docs/migration.md) and
-[performance measurements](docs/performance.md).
+[bounded-heap raster test](docs/performance.md).
 
 Raster algorithms were moved from `hop-vector-raster-plugin`; its MIT license and copyright notice
 are retained in [LICENSE](LICENSE). GeoTools and other dependencies retain their own licenses.

@@ -9,7 +9,8 @@ Use the shared `write_maven_settings.py` helper to prepare Maven repositories.
 The companion Vector/Raster repository consumes this repository's Maven artifacts:
 use `mvn -s "$MAVEN_SETTINGS" install` for coordinated local development.
 
-The adapter's imported tests exercise the existing raster algorithms; retain them when refactoring.
+The adapter tests cover raster semantics. See [the large-raster check](docs/performance.md)
+for clip, reproject and write under a fixed heap.
 Raster values must never own open readers or pixel arrays. Do not add GeoTools dependencies to core.
 Installed integration is tested with the companion Vector/Raster ZIP, Geometry 0.2.0-SNAPSHOT ZIP,
 and the Raster Type ZIP, using `scripts/run-installed-e2e.py` in the companion repository.

@@ -19,7 +19,7 @@ class OverviewWriteTest {
   @Test
   void geotiffOverviewsKeepColorMetadataAcrossMultipleLevels() throws Exception {
     Path fixtures = dir.resolve("fixtures");
-    BenchmarkFixtures.main(new String[] {fixtures.toString(), "1024", "variants"});
+    TiledRasterFixtures.write(fixtures, 1024, "rgba", "palette", "numeric4");
     for (String kind : new String[] {"rgba", "palette", "numeric4"}) {
       Path input = fixtures.resolve(kind + ".tif");
       Path output = dir.resolve(kind + ".tif");

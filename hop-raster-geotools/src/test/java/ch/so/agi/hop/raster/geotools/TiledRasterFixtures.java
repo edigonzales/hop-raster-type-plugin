@@ -9,15 +9,9 @@ import org.geotools.gce.geotiff.GeoTiffWriteParams;
 import org.geotools.referencing.CRS;
 
 /** Deterministic tiled files generated without allocating the complete image. */
-public final class BenchmarkFixtures {
-  public static void main(String[] args) throws Exception {
-    Path dir = Path.of(args[0]);
+final class TiledRasterFixtures {
+  static void write(Path dir, int size, String... kinds) throws Exception {
     Files.createDirectories(dir);
-    int size = args.length > 1 ? Integer.parseInt(args[1]) : 2048;
-    String[] kinds =
-        args.length > 2 && args[2].equals("variants")
-            ? new String[] {"rgba", "palette", "numeric4"}
-            : new String[] {"dem", "rgb"};
     for (String kind : kinds) {
       boolean rgb = kind.equals("rgb") || kind.equals("rgba");
       boolean palette = kind.equals("palette");
