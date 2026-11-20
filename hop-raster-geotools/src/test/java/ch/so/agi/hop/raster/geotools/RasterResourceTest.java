@@ -18,17 +18,17 @@ class RasterResourceTest {
     try (var backend = new GeoToolsRasterBackend()) {
       var first = backend.describe(a.toString());
       var session = backend.session(first, () -> false);
-      var raw = (GeoTiffSource) AcceptanceProbe.field(backend, "source");
+      var raw = (GeoTiffSource) RasterTestSupport.field(backend, "source");
       session.read(new RasterWindow(0, 0, 16, 16), 0);
       backend.describe(b.toString());
       assertThatThrownBy(session::source).isInstanceOf(IllegalStateException.class);
       assertThat(raw.cachedBytes()).isZero();
-      AcceptanceProbe.resources(backend, 0);
+      RasterTestSupport.resources(backend, 0);
       try (var reopened = backend.session(first, () -> false)) {
         reopened.read(new RasterWindow(0, 0, 16, 16), 0);
       }
       backend.close();
-      AcceptanceProbe.resources(backend, 0);
+      RasterTestSupport.resources(backend, 0);
     }
   }
 
@@ -55,14 +55,14 @@ class RasterResourceTest {
           try (var session = backend.session(value, () -> false)) {
             session.read(new RasterWindow(0, 0, 32, 32), 0);
             var cache =
-                (org.eclipse.imagen.TileCache) AcceptanceProbe.field(session, "outputCache");
+                (org.eclipse.imagen.TileCache) RasterTestSupport.field(session, "outputCache");
             var operations =
-                (org.eclipse.imagen.TileCache) AcceptanceProbe.field(session, "operationCache");
+                (org.eclipse.imagen.TileCache) RasterTestSupport.field(session, "operationCache");
             assertThat(cache.getMemoryCapacity()).isEqualTo(16L * 1024 * 1024);
             assertThat(operations.getMemoryCapacity()).isEqualTo(8L * 1024 * 1024);
-            AcceptanceProbe.resources(backend, 1);
+            RasterTestSupport.resources(backend, 1);
           }
-        AcceptanceProbe.resources(backend, 0);
+        RasterTestSupport.resources(backend, 0);
       }
     }
   }

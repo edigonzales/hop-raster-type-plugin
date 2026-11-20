@@ -13,8 +13,8 @@ public final class MultiBandProbe {
       try (var backend = new GeoToolsRasterBackend()) {
         var value = backend.describe(dir.resolve(kind + ".tif").toString());
         var g = value.result().grid();
-        var outer = AcceptanceProbe.region(g, 0, 0, 1024);
-        var inner = AcceptanceProbe.region(g, 256, 256, 256);
+        var outer = RasterTestSupport.region(g, 0, 0, 1024);
+        var inner = RasterTestSupport.region(g, 256, 256, 256);
         var factory = new GeometryFactory();
         var mask =
             factory.createPolygon(
@@ -49,10 +49,10 @@ public final class MultiBandProbe {
               if (actual != source) throw new AssertionError("Band order/value mismatch");
             }
           }
-          AcceptanceProbe.resources(backend, 1);
+          RasterTestSupport.resources(backend, 1);
         }
         backend.write(derived, dir.resolve(kind + "-masked.tif"), true, () -> false);
-        AcceptanceProbe.resources(backend, 0);
+        RasterTestSupport.resources(backend, 0);
         System.out.println("MULTIBAND_PASS " + kind);
       }
   }

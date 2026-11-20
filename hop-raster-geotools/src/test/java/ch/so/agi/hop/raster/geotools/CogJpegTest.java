@@ -48,7 +48,7 @@ class CogJpegTest {
   @Test
   void writesYcbcrJpegCogForRgb() throws Exception {
     Path fixtures = dir.resolve("fixtures");
-    BenchmarkFixtures.main(new String[] {fixtures.toString(), "1024"});
+    TiledRasterFixtures.write(fixtures, 1024, "rgb");
     Path input = fixtures.resolve("rgb.tif");
     Path output = dir.resolve("rgb-cog.tif");
     try (var backend = new GeoToolsRasterBackend()) {
@@ -135,7 +135,7 @@ class CogJpegTest {
   @Test
   void qualityChangesTheFileSize() throws Exception {
     Path fixtures = dir.resolve("fixtures");
-    BenchmarkFixtures.main(new String[] {fixtures.toString(), "1024"});
+    TiledRasterFixtures.write(fixtures, 1024, "rgb");
     Path input = fixtures.resolve("rgb.tif");
     Path low = dir.resolve("low.tif");
     Path high = dir.resolve("high.tif");
@@ -151,7 +151,7 @@ class CogJpegTest {
   @Test
   void rejectsJpegForUnsupportedRasters() throws Exception {
     Path fixtures = dir.resolve("fixtures");
-    BenchmarkFixtures.main(new String[] {fixtures.toString(), "1024", "variants"});
+    TiledRasterFixtures.write(fixtures, 1024, "rgba", "palette", "numeric4");
     try (var backend = new GeoToolsRasterBackend()) {
       for (String kind : List.of("rgba", "palette", "numeric4")) {
         var dataset = backend.describe(fixtures.resolve(kind + ".tif").toString());
@@ -176,7 +176,7 @@ class CogJpegTest {
   @Test
   void cleansTemporaryFilesWhenStoppedDuringJpeg() throws Exception {
     Path fixtures = dir.resolve("fixtures");
-    BenchmarkFixtures.main(new String[] {fixtures.toString(), "1024"});
+    TiledRasterFixtures.write(fixtures, 1024, "rgb");
     Path input = fixtures.resolve("rgb.tif");
     Path output = dir.resolve("stopped.tif");
     try (var backend = new GeoToolsRasterBackend()) {
@@ -200,7 +200,7 @@ class CogJpegTest {
   @Test
   void remoteReaderReadsJpegCogWithRanges() throws Exception {
     Path fixtures = dir.resolve("fixtures");
-    BenchmarkFixtures.main(new String[] {fixtures.toString(), "1024"});
+    TiledRasterFixtures.write(fixtures, 1024, "rgb");
     Path output = dir.resolve("remote-rgb.tif");
     try (var backend = new GeoToolsRasterBackend()) {
       backend.write(

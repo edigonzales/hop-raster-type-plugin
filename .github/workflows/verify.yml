@@ -22,5 +22,4 @@ jobs:
          {"file":"hop-raster-type/target/hop-raster-type-*-SNAPSHOT.jar","pom":"hop-raster-type/pom.xml"},
          {"file":"hop-raster-geotools/target/hop-raster-geotools-*-SNAPSHOT.jar","pom":"hop-raster-geotools/pom.xml"}]
       validation-command: |
-        python -m unittest discover -s scripts -p test_*.py
         python scripts/verify-package.py

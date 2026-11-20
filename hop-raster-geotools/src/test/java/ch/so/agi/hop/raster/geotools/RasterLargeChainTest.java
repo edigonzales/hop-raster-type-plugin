@@ -5,12 +5,22 @@ import java.awt.Rectangle;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.IntStream;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.junit.jupiter.api.io.TempDir;
 
 /** Large derived output, with independent nearest-neighbour checks at tile boundaries. */
-public final class LargeChainProbe {
-  public static void main(String[] args) throws Exception {
+@EnabledIfSystemProperty(named = "raster.largeChain", matches = "true")
+class RasterLargeChainTest {
+  @TempDir Path directory;
+
+  @Test
+  void clipReprojectAndWriteWithinBoundedHeap() throws Exception {
+    TiledRasterFixtures.write(directory, 16384, "rgb");
+    Path inputFile = directory.resolve("rgb.tif");
+    Path outputFile = directory.resolve("clipped.tif");
     try (var backend = new GeoToolsRasterBackend()) {
-      var input = backend.describe(args[0]);
+      var input = backend.describe(inputFile.toString());
       var grid = input.result().grid();
       int size = grid.width() / 2, start = grid.width() / 4;
       var clipped =
@@ -18,7 +28,7 @@ public final class LargeChainProbe {
               input,
               new RasterOperation.Clip(
                   "large-clip",
-                  AcceptanceProbe.region(grid, start, start, size).toText(),
+                  RasterTestSupport.region(grid, start, start, size).toText(),
                   false,
                   IntStream.range(0, input.result().bands().size()).boxed().toList(),
                   null));
@@ -27,10 +37,10 @@ public final class LargeChainProbe {
               clipped,
               new RasterOperation.Reproject(
                   "large-warp", "EPSG:2056", 1, 1, List.of(), "NEAREST", "AUTO", null, null));
-      backend.write(warped, Path.of(args[1]), true, () -> false);
-      AcceptanceProbe.resources(backend, 0);
-      try (var actual = new GeoTiffSource(new RasterDatasetRef(args[1]));
-          var source = new GeoTiffSource(new RasterDatasetRef(args[0]))) {
+      backend.write(warped, outputFile, true, () -> false);
+      RasterTestSupport.resources(backend, 0);
+      try (var actual = new GeoTiffSource(new RasterDatasetRef(outputFile.toString()));
+          var source = new GeoTiffSource(new RasterDatasetRef(inputFile.toString()))) {
         if (actual.bounds().width != size / 2 || actual.bounds().height != size / 2)
           throw new AssertionError("Unexpected output grid");
         int[] points = {0, 1, 255, 256, 511, 512, 513, size / 4, size / 2 - 1};
@@ -57,8 +67,7 @@ public final class LargeChainProbe {
           }
       }
       backend.close();
-      AcceptanceProbe.resources(backend, 0);
-      System.out.println("LARGE_CHAIN_PASS size=" + size);
+      RasterTestSupport.resources(backend, 0);
     }
   }
 }
