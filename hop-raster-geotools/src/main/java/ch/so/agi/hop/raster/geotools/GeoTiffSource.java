@@ -1,5 +1,6 @@
 package ch.so.agi.hop.raster.geotools;
 
+import ch.so.agi.hop.raster.RasterReference;
 import it.geosolutions.imageio.compression.CompressionFinder;
 import it.geosolutions.imageio.core.BasicAuthURI;
 import it.geosolutions.imageio.stream.input.spi.StringImageInputStreamSpi;
@@ -55,7 +56,6 @@ public final class GeoTiffSource implements RasterSource {
   private final Map<RasterReadRequest, Raster> cache = new LinkedHashMap<>(16, .75f, true);
   private long cacheBytes;
   private boolean closed;
-  private final RasterDatasetRef reference;
 
   private static final class RawReader extends GeoTiffReader {
     private Rectangle requestedWindow;
@@ -154,7 +154,7 @@ public final class GeoTiffSource implements RasterSource {
     }
   }
 
-  public GeoTiffSource(RasterDatasetRef ref) throws IOException {
+  public GeoTiffSource(RasterReference ref) throws IOException {
     GeoToolsRuntimeSupport.initialize();
     ClassLoader pluginLoader = GeoTiffSource.class.getClassLoader();
     ClassLoader previousLoader = Thread.currentThread().getContextClassLoader();
@@ -167,7 +167,6 @@ public final class GeoTiffSource implements RasterSource {
     } finally {
       Thread.currentThread().setContextClassLoader(previousLoader);
     }
-    reference = ref;
     Object input;
     if (ref.remote()) {
       input =
@@ -187,15 +186,6 @@ public final class GeoTiffSource implements RasterSource {
     } finally {
       Thread.currentThread().setContextClassLoader(previousLoader);
     }
-  }
-
-  public void requireDifferentOutput(java.nio.file.Path target) throws IOException {
-    if (reference.remote()) return;
-    var input = java.nio.file.Path.of(reference.location());
-    var output = target.toAbsolutePath().normalize();
-    if (output.equals(input)
-        || (java.nio.file.Files.exists(output) && java.nio.file.Files.isSameFile(input, output)))
-      throw new IllegalArgumentException("Reproject output must differ from its input");
   }
 
   @Override

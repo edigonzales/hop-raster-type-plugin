@@ -2,10 +2,11 @@ package ch.so.agi.hop.raster.geotools;
 
 import static org.assertj.core.api.Assertions.*;
 
+import ch.so.agi.hop.raster.RasterOperation;
+import ch.so.agi.hop.raster.RasterReference;
 import java.awt.Rectangle;
 import java.awt.image.DataBuffer;
 import java.awt.image.Raster;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
 import org.geotools.api.referencing.operation.MathTransform;
@@ -87,24 +88,15 @@ class RasterSemanticsTest {
       assertThat(ZonalStatistics.compute(source, zone, 1, null).mean()).isEqualTo(105);
       // Override replaces the source sentinel; zero must not be treated as NoData by default.
       assertThat(ZonalStatistics.compute(source, zone, 1, 10d).count()).isZero();
-      Path output = dir.resolve("scaled.tif");
-      RasterClip.write(source, zone, true, 0, null, output, false, () -> false);
-      try (var copy = new GeoTiffSource(new RasterDatasetRef(output.toString()))) {
+      var operation = new RasterOperation.Clip(
+          "clip", zone.toText(), true, java.util.List.of(0), null);
+      try (var copy = new DerivedSource(source, operation, () -> false)) {
         assertThat(copy.dataType()).isEqualTo(DataBuffer.TYPE_USHORT);
         assertThat(copy.scale(0)).isEqualTo(.5);
         assertThat(copy.offset(0)).isEqualTo(100);
         assertThat(copy.read(new RasterReadRequest(copy.bounds(), 0)).getSampleDouble(3, 2, 0))
             .isEqualTo(11);
         assertThat(ZonalStatistics.compute(copy, zone, 0, null).mean()).isEqualTo(103);
-      }
-      Path cancelled = dir.resolve("cancelled.tif");
-      assertThatThrownBy(
-              () -> RasterClip.write(source, zone, true, 0, null, cancelled, false, () -> true))
-          .isInstanceOf(Exception.class);
-      assertThat(cancelled).doesNotExist();
-      try (var files = Files.list(dir)) {
-        assertThat(files.map(p -> p.getFileName().toString()).toList())
-            .containsExactly("scaled.tif");
       }
     }
   }
@@ -147,7 +139,7 @@ class RasterSemanticsTest {
   void zeroIsValidAndNonzeroWindowIsAligned() throws Exception {
     try (var source =
         new GeoTiffSource(
-            new RasterDatasetRef(RasterCoreTest.fixture(dir.resolve("input.tif")).toString()))) {
+            new RasterReference(RasterCoreTest.fixture(dir.resolve("input.tif")).toString(), null))) {
       var zero =
           ZonalStatistics.compute(
               source, RasterCoreTest.box(2600001.25, 1200255.75, 2600001.5, 1200256), 0, null);

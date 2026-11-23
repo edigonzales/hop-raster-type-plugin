@@ -129,9 +129,7 @@ final class DerivedSource implements RasterSource {
         RasterReprojectRequest.Interpolation.valueOf(r.interpolation()),
         RasterReprojectRequest.OutputType.valueOf(r.outputType()),
         r.sourceNoData(),
-        r.outputNoData(),
-        java.nio.file.Path.of("unused-output"),
-        false);
+        r.outputNoData());
   }
 
   org.eclipse.imagen.PlanarImage image() {

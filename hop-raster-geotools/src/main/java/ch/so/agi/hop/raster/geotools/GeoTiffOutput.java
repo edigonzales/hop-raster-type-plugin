@@ -29,26 +29,6 @@ final class GeoTiffOutput {
   static void write(
       Path file,
       RenderedImage image,
-      RasterSource source,
-      int band,
-      double noData,
-      GeoTiffWriteParams options)
-      throws Exception {
-    write(
-        file,
-        image,
-        source.crs(),
-        (AffineTransform) source.gridToWorld(),
-        new double[] {source.scale(band)},
-        new double[] {source.offset(band)},
-        noData,
-        RasterColorInfo.numeric(),
-        options);
-  }
-
-  static void write(
-      Path file,
-      RenderedImage image,
       CoordinateReferenceSystem crs,
       AffineTransform gridToWorld,
       double[] scales,

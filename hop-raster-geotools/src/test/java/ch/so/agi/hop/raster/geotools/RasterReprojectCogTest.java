@@ -2,7 +2,11 @@ package ch.so.agi.hop.raster.geotools;
 
 import static org.assertj.core.api.Assertions.*;
 
+import ch.so.agi.hop.raster.RasterOperation;
+import ch.so.agi.hop.raster.RasterReference;
+import ch.so.agi.hop.raster.RasterWriteOptions;
 import com.sun.net.httpserver.HttpServer;
+import java.awt.image.DataBuffer;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,34 +44,30 @@ class RasterReprojectCogTest {
           exchange.close();
         });
     server.start();
-    try (var source =
-        new GeoTiffSource(
-            new RasterDatasetRef(
-                "http://127.0.0.1:" + server.getAddress().getPort() + "/raster.tif"))) {
+    try (var backend = new GeoToolsRasterBackend()) {
+      var input = backend.describe("http://127.0.0.1:" + server.getAddress().getPort() + "/raster.tif");
+      var operation = new RasterOperation.Reproject("reproject", "EPSG:2056", .5, .5,
+          java.util.List.of(2600000d, 1200255.5, 2600001d, 1200256d),
+          "BILINEAR", "FLOAT32", null, -1000d);
+      var value = backend.derive(input, operation);
       long first = 0;
       for (int iteration = 0; iteration < 2; iteration++) {
         Path target = dir.resolve("output-" + iteration + ".tif");
-        var request =
-            new RasterReprojectRequest(
-                "EPSG:2056",
-                .5,
-                .5,
-                new RasterReprojectRequest.Extent(2600000, 1200255.5, 2600001, 1200256),
-                RasterReprojectRequest.Interpolation.BILINEAR,
-                RasterReprojectRequest.OutputType.AUTO,
-                null,
-                null,
-                target,
-                false);
-        RasterReproject.write(source, request, () -> false);
-        try (var result = new GeoTiffSource(new RasterDatasetRef(target.toString()))) {
+        backend.write(value, target, false, () -> false,
+            RasterWriteOptions.geoTiff("Deflate"), ignored -> {});
+        try (var result = new GeoTiffSource(new RasterReference(target.toString(), null))) {
+          assertThat(result.dataType()).isEqualTo(DataBuffer.TYPE_FLOAT);
+          assertThat(result.noData(0)).isEqualTo(-1000d);
           assertThat(RasterReprojectTest.band(result, 0)).containsExactly(3.5, 5.5);
         }
         if (iteration == 0) first = bytes.get();
         else assertThat(bytes.get()).isEqualTo(first);
       }
       assertThat(bytes.get()).isLessThan(file.length / 2L);
-      assertThat(source.cachedBytes()).isLessThanOrEqualTo(64L * 1024 * 1024);
+      try (var source = backend.session(input, () -> false)) {
+        assertThat(((GeoTiffSource) source.source()).cachedBytes())
+            .isLessThanOrEqualTo(64L * 1024 * 1024);
+      }
     } finally {
       server.stop(0);
     }

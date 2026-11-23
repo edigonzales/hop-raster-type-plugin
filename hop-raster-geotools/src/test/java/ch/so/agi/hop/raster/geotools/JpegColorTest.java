@@ -2,6 +2,7 @@ package ch.so.agi.hop.raster.geotools;
 
 import static org.assertj.core.api.Assertions.*;
 
+import ch.so.agi.hop.raster.RasterReference;
 import java.awt.Rectangle;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
@@ -116,7 +117,7 @@ class JpegColorTest {
               reader.getImageMetadata(0));
       assertThat(tags.getTIFFField(262).getAsInt(0)).isEqualTo(6);
       var expected = reader.read(0);
-      try (var source = new GeoTiffSource(new RasterDatasetRef(file.toString()))) {
+      try (var source = new GeoTiffSource(new RasterReference(file.toString(), null))) {
         assertThat(source.colorInfo().kind()).isEqualTo(RasterColorInfo.Kind.RGB);
         for (int b = 0; b < 3; b++) {
           var samples = source.read(new RasterReadRequest(new Rectangle(0, 0, 32, 32), b));

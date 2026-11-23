@@ -51,7 +51,8 @@ public final class MultiBandProbe {
           }
           RasterTestSupport.resources(backend, 1);
         }
-        backend.write(derived, dir.resolve(kind + "-masked.tif"), true, () -> false);
+        backend.write(derived, dir.resolve(kind + "-masked.tif"), true, () -> false,
+            RasterWriteOptions.geoTiff("Deflate"), ignored -> {});
         RasterTestSupport.resources(backend, 0);
         System.out.println("MULTIBAND_PASS " + kind);
       }

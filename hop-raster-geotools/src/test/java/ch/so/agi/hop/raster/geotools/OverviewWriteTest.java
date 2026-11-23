@@ -3,6 +3,7 @@ package ch.so.agi.hop.raster.geotools;
 import static org.assertj.core.api.Assertions.*;
 
 import ch.so.agi.hop.raster.RasterOperation;
+import ch.so.agi.hop.raster.RasterReference;
 import ch.so.agi.hop.raster.RasterWriteOptions;
 import java.awt.Rectangle;
 import java.awt.geom.AffineTransform;
@@ -38,8 +39,8 @@ class OverviewWriteTest {
                 75),
             ignored -> {});
       }
-      try (var source = new GeoTiffSource(new RasterDatasetRef(input.toString()));
-          var written = new GeoTiffSource(new RasterDatasetRef(output.toString()));
+      try (var source = new GeoTiffSource(new RasterReference(input.toString(), null));
+          var written = new GeoTiffSource(new RasterReference(output.toString(), null));
           var stream = ImageIO.createImageInputStream(output.toFile())) {
         assertThat(written.colorInfo().kind()).isEqualTo(source.colorInfo().kind());
         assertThat(written.colorInfo().alphaBand()).isEqualTo(source.colorInfo().alphaBand());
@@ -76,7 +77,7 @@ class OverviewWriteTest {
     Path output = dir.resolve("big.tif");
     var reader = new org.geotools.gce.geotiff.GeoTiffReader(input.toFile());
     var coverage = reader.read();
-    try (var source = new GeoTiffSource(new RasterDatasetRef(input.toString()))) {
+    try (var source = new GeoTiffSource(new RasterReference(input.toString(), null))) {
       var params = new org.geotools.gce.geotiff.GeoTiffWriteParams();
       params.setForceToBigTIFF(true);
       params.setTilingMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
@@ -191,7 +192,7 @@ class OverviewWriteTest {
                   List.of(0),
                   null);
           try (var backend = new GeoToolsRasterBackend();
-              var source = new GeoTiffSource(new RasterDatasetRef(input.toString()))) {
+              var source = new GeoTiffSource(new RasterReference(input.toString(), null))) {
             var derived = new DerivedSource(source, clip, () -> false);
             assertThat(derived.bounds()).isEqualTo(new Rectangle(x, y, 777, 665));
             var progress = new ArrayList<Integer>();
@@ -205,7 +206,7 @@ class OverviewWriteTest {
                 progress::add);
             assertThat(progress).isSorted().contains(100);
             try (var stream = ImageIO.createImageInputStream(output.toFile());
-                var result = new GeoTiffSource(new RasterDatasetRef(output.toString()))) {
+                var result = new GeoTiffSource(new RasterReference(output.toString(), null))) {
               var reader = ImageIO.getImageReaders(stream).next();
               try {
                 reader.setInput(stream);
