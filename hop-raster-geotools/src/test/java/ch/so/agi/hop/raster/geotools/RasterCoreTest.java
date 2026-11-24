@@ -2,6 +2,9 @@ package ch.so.agi.hop.raster.geotools;
 
 import static org.assertj.core.api.Assertions.*;
 
+import ch.so.agi.hop.raster.RasterOperation;
+import ch.so.agi.hop.raster.RasterReference;
+import ch.so.agi.hop.raster.RasterWriteOptions;
 import com.sun.net.httpserver.HttpServer;
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -91,7 +94,7 @@ class RasterCoreTest {
     Path input = fixture(dir.resolve("input.tif"));
     Raster first;
     Raster second;
-    try (var source = new GeoTiffSource(new RasterDatasetRef(input.toString()))) {
+    try (var source = new GeoTiffSource(new RasterReference(input.toString(), null))) {
       var firstRequest = new RasterReadRequest(new Rectangle(0, 0, 2, 2), 0);
       first = source.read(firstRequest);
       second = source.read(new RasterReadRequest(new Rectangle(2, 1, 2, 2), 0));
@@ -108,7 +111,7 @@ class RasterCoreTest {
   @Test
   void interruptedLocalReadReleasesFileHandles() throws Exception {
     Path input = fixture(dir.resolve("interrupted.tif"));
-    try (var source = new GeoTiffSource(new RasterDatasetRef(input.toString()))) {
+    try (var source = new GeoTiffSource(new RasterReference(input.toString(), null))) {
       try {
         Thread.currentThread().interrupt();
         assertThatThrownBy(() -> source.read(new RasterReadRequest(new Rectangle(0, 0, 4, 3), 0)))
@@ -125,8 +128,9 @@ class RasterCoreTest {
 
   @Test
   void localWindowStatisticsAndClipPreserveGrid() throws Exception {
-    try (var source =
-        new GeoTiffSource(new RasterDatasetRef(fixture(dir.resolve("in.tif")).toString()))) {
+    Path input = fixture(dir.resolve("in.tif"));
+    try (var backend = new GeoToolsRasterBackend();
+        var source = new GeoTiffSource(new RasterReference(input.toString(), null))) {
       assertThat(source.bands()).isEqualTo(1);
       assertThat(source.noData(0)).isEqualTo(-9999d);
       Raster tile = source.read(new RasterReadRequest(new Rectangle(0, 0, 4, 3), 0));
@@ -142,8 +146,12 @@ class RasterCoreTest {
       assertThat(ZonalStatistics.compute(source, null, 0, null).status())
           .isEqualTo("EMPTY_GEOMETRY");
       Path out = dir.resolve("clip.tif");
-      RasterClip.write(source, zone, true, 0, null, out, false, () -> false);
-      try (var clipped = new GeoTiffSource(new RasterDatasetRef(out.toString()))) {
+      var value = backend.describe(input.toString());
+      var clip = backend.derive(value, new RasterOperation.Clip(
+          "clip", zone.toText(), true, java.util.List.of(0), null));
+      var options = RasterWriteOptions.geoTiff("Deflate");
+      backend.write(clip, out, false, () -> false, options, ignored -> {});
+      try (var clipped = new GeoTiffSource(new RasterReference(out.toString(), null))) {
         assertThat(clipped.bounds().width).isEqualTo(4);
         assertThat(clipped.bounds().height).isEqualTo(3);
         assertThat(
@@ -152,7 +160,7 @@ class RasterCoreTest {
         assertThat(ZonalStatistics.compute(clipped, zone, 0, null).mean()).isEqualTo(6.5);
       }
       assertThatThrownBy(
-              () -> RasterClip.write(source, zone, true, 0, null, out, false, () -> false))
+              () -> backend.write(clip, out, false, () -> false, options, ignored -> {}))
           .hasMessageContaining("exists");
       assertThat(source.cachedBytes()).isLessThanOrEqualTo(64L * 1024 * 1024);
     }
@@ -186,8 +194,7 @@ class RasterCoreTest {
     server.start();
     try (var source =
         new GeoTiffSource(
-            new RasterDatasetRef(
-                "http://127.0.0.1:" + server.getAddress().getPort() + "/cog.tif"))) {
+            new RasterReference("http://127.0.0.1:" + server.getAddress().getPort() + "/cog.tif", null))) {
       var request = new RasterReadRequest(new Rectangle(0, 0, 512, 512), 0);
       assertThat(source.read(request).getSampleDouble(3, 2, 0)).isEqualTo(12);
       long before = bytes.get();

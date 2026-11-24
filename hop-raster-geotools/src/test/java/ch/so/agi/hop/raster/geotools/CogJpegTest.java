@@ -3,6 +3,7 @@ package ch.so.agi.hop.raster.geotools;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.so.agi.hop.raster.RasterReference;
 import ch.so.agi.hop.raster.RasterWriteOptions;
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -71,7 +72,7 @@ class CogJpegTest {
       assertThat(overview.has(34735)).isFalse();
       tiff.checkLeadersAndTrailers();
 
-      try (var source = new GeoTiffSource(new RasterDatasetRef(input.toString()));
+      try (var source = new GeoTiffSource(new RasterReference(input.toString(), null));
           ImageInputStream stream = ImageIO.createImageInputStream(output.toFile())) {
         ImageReader reader = ImageIO.getImageReaders(stream).next();
         reader.setInput(stream);
@@ -112,8 +113,8 @@ class CogJpegTest {
       assertThat(directory.getTIFFField(530)).isNull();
       reader.dispose();
     }
-    try (var source = new GeoTiffSource(new RasterDatasetRef(input.toString()));
-        var written = new GeoTiffSource(new RasterDatasetRef(output.toString()))) {
+    try (var source = new GeoTiffSource(new RasterReference(input.toString(), null));
+        var written = new GeoTiffSource(new RasterReference(output.toString(), null))) {
       var expected = source.read(new RasterReadRequest(new Rectangle(0, 0, 64, 64), 0));
       var actual = written.read(new RasterReadRequest(new Rectangle(0, 0, 64, 64), 0));
       for (int blockY = 0; blockY < 64; blockY += 8)
@@ -239,8 +240,7 @@ class CogJpegTest {
     server.start();
     try (var source =
         new GeoTiffSource(
-            new RasterDatasetRef(
-                "http://127.0.0.1:" + server.getAddress().getPort() + "/cog.tif"))) {
+            new RasterReference("http://127.0.0.1:" + server.getAddress().getPort() + "/cog.tif", null))) {
       assertThat(source.bands()).isEqualTo(3);
       assertThat(source.colorInfo().kind()).isEqualTo(RasterColorInfo.Kind.RGB);
       var request = new RasterReadRequest(new Rectangle(0, 0, 128, 128), 0);
@@ -258,8 +258,8 @@ class CogJpegTest {
    * still catch a channel swap or a wrong color space loudly.
    */
   private static void assertRgbPlausible(Path sourceFile, Path cogFile) throws Exception {
-    try (var source = new GeoTiffSource(new RasterDatasetRef(sourceFile.toString()));
-        var written = new GeoTiffSource(new RasterDatasetRef(cogFile.toString()))) {
+    try (var source = new GeoTiffSource(new RasterReference(sourceFile.toString(), null));
+        var written = new GeoTiffSource(new RasterReference(cogFile.toString(), null))) {
       var window = new Rectangle(96, 96, 128, 128);
       for (int band = 0; band < 3; band++) {
         var expected = source.read(new RasterReadRequest(window, band));

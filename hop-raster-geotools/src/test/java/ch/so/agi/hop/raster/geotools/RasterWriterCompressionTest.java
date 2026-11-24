@@ -3,6 +3,8 @@ package ch.so.agi.hop.raster.geotools;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.so.agi.hop.raster.RasterReference;
+import ch.so.agi.hop.raster.RasterWriteOptions;
 import it.geosolutions.imageio.plugins.tiff.BaselineTIFFTagSet;
 import it.geosolutions.imageio.plugins.tiff.TIFFDirectory;
 import java.awt.Rectangle;
@@ -47,19 +49,21 @@ class RasterWriterCompressionTest {
               new Selection("LZW", 5))) {
         Path output = dir.resolve(selection.name().toLowerCase() + ".tif");
         var progress = new ArrayList<Integer>();
-        backend.write(dataset, output, false, () -> false, selection.name(), progress::add);
+        backend.write(dataset, output, false, () -> false,
+            RasterWriteOptions.geoTiff(selection.name()), progress::add);
 
         assertThat(compressionTag(output)).isEqualTo(selection.tag());
         assertThat(progress).isNotEmpty().contains(100);
         assertThat(progress).isSorted();
-        try (var written = new GeoTiffSource(new RasterDatasetRef(output.toString()))) {
+        try (var written = new GeoTiffSource(new RasterReference(output.toString(), null))) {
           var pixels = written.read(new RasterReadRequest(new Rectangle(0, 0, 4, 3), 0));
           assertThat(pixels.getSampleDouble(3, 2, 0)).isEqualTo(12);
         }
       }
 
       Path defaultOutput = dir.resolve("default.tif");
-      backend.write(dataset, defaultOutput, false, () -> false);
+      backend.write(dataset, defaultOutput, false, () -> false,
+          RasterWriteOptions.geoTiff("Deflate"), ignored -> {});
       assertThat(compressionTag(defaultOutput)).isEqualTo(32946);
     }
   }
@@ -72,8 +76,8 @@ class RasterWriterCompressionTest {
       var dataset = backend.describe(input.toString());
       assertThatThrownBy(
               () ->
-                  backend.write(
-                      dataset, output, false, () -> false, "not-a-codec", ignored -> {}))
+                  backend.write(dataset, output, false, () -> false,
+                      RasterWriteOptions.geoTiff("not-a-codec"), ignored -> {}))
           .isInstanceOf(Exception.class);
     }
     assertThat(output).doesNotExist();

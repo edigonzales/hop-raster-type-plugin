@@ -5,75 +5,18 @@ import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.image.*;
 import java.io.IOException;
-import java.nio.file.*;
 import java.util.Arrays;
 import java.util.function.BooleanSupplier;
-import javax.imageio.ImageWriteParam;
 import org.eclipse.imagen.*;
 import org.geotools.api.referencing.datum.PixelInCell;
 import org.geotools.api.referencing.operation.MathTransform;
 import org.geotools.coverage.grid.*;
 import org.geotools.coverage.processing.CoverageProcessor;
-import org.geotools.gce.geotiff.GeoTiffWriteParams;
 import org.geotools.util.factory.Hints;
 
 /** Bounded, lazy output tiles backed by GeoTools Resample operations on weighted source windows. */
 public final class RasterReproject {
   private RasterReproject() {}
-
-  public static void write(
-      RasterSource source, RasterReprojectRequest request, BooleanSupplier stopped)
-      throws Exception {
-    checkStopped(stopped);
-    if (source instanceof GeoTiffSource tiff) tiff.requireDifferentOutput(request.output());
-    var grid = RasterTargetGrid.create(source, request);
-    var format = Format.create(source, request);
-    Path output = request.output().toAbsolutePath().normalize();
-    if (!Files.isDirectory(output.getParent()))
-      throw new IOException("Output directory does not exist");
-    if (!request.overwrite() && Files.exists(output))
-      throw new IOException("Output already exists: " + output);
-    Path temp = Files.createTempFile(output.getParent(), ".hop-raster-", ".tif");
-    ReprojectImage image = null;
-    try {
-      image = new ReprojectImage(source, request, grid, format, stopped);
-      var options = new GeoTiffWriteParams();
-      options.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
-      options.setCompressionType("Deflate");
-      options.setTilingMode(ImageWriteParam.MODE_EXPLICIT);
-      options.setTiling(512, 512);
-      double bytes =
-          (double) grid.width()
-              * grid.height()
-              * format.bands
-              * DataBuffer.getDataTypeSize(format.type)
-              / 8;
-      options.setForceToBigTIFF(bytes >= 2L * 1024 * 1024 * 1024);
-      double[] scales = new double[format.bands], offsets = new double[format.bands];
-      Arrays.fill(scales, 1);
-      if (format.color.kind() == RasterColorInfo.Kind.NUMERIC)
-        for (int b = 0; b < format.bands; b++) {
-          scales[b] = source.scale(b);
-          offsets[b] = source.offset(b);
-        }
-      GeoTiffOutput.write(
-          temp,
-          image,
-          grid.crs(),
-          grid.gridToWorld(),
-          scales,
-          offsets,
-          format.noData,
-          format.color,
-          options);
-      checkStopped(stopped);
-      if (request.overwrite()) Files.move(temp, output, StandardCopyOption.REPLACE_EXISTING);
-      else Files.move(temp, output);
-    } finally {
-      if (image != null) image.dispose();
-      Files.deleteIfExists(temp);
-    }
-  }
 
   private static void checkStopped(BooleanSupplier stopped) throws IOException {
     GeoTiffSource.checkInterrupted();
@@ -157,23 +100,6 @@ public final class RasterReproject {
     private final MathTransform worldToSource;
     private final TileCache operationCache;
     private final CoverageProcessor processor;
-
-    ReprojectImage(
-        RasterSource source,
-        RasterReprojectRequest request,
-        RasterTargetGrid grid,
-        Format format,
-        BooleanSupplier stopped)
-        throws Exception {
-      this(
-          source,
-          request,
-          grid,
-          format,
-          stopped,
-          ImageN.createTileCache(16L * 1024 * 1024),
-          ImageN.createTileCache(8L * 1024 * 1024));
-    }
 
     ReprojectImage(
         RasterSource source,

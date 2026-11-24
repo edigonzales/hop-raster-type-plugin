@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.*;
 import ch.so.agi.hop.raster.*;
 import java.nio.file.*;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -26,31 +27,19 @@ class RasterDatasetTest {
       assertThat(Files.list(dir).count()).isEqualTo(1);
       chain = RasterCodec.decode(RasterCodec.encode(chain));
     }
-    try (var source = new GeoTiffSource(new RasterDatasetRef(input.toString()))) {
-      RasterClip.write(source, box, true, 0, null, dir.resolve("clip.tif"), false, () -> false);
-    }
-    try (var source = new GeoTiffSource(new RasterDatasetRef(dir.resolve("clip.tif").toString()))) {
-      var req = DerivedSource.request(warp);
-      RasterReproject.write(
-          source,
-          new RasterReprojectRequest(
-              req.targetCrs(),
-              req.resolutionX(),
-              req.resolutionY(),
-              req.extent(),
-              req.interpolation(),
-              req.outputType(),
-              null,
-              null,
-              dir.resolve("baseline.tif"),
-              false),
-          () -> false);
-    }
+    var options = RasterWriteOptions.geoTiff("Deflate");
     try (var backend = new GeoToolsRasterBackend()) {
-      backend.write(chain, dir.resolve("candidate.tif"), false, () -> false);
+      var raw = backend.describe(input.toString());
+      var clipped = backend.derive(raw, clip);
+      Path materialized = dir.resolve("clip.tif");
+      backend.write(clipped, materialized, false, () -> false, options, ignored -> {});
+      var reopened = backend.describe(materialized.toString());
+      backend.write(backend.derive(reopened, warp), dir.resolve("baseline.tif"), false,
+          () -> false, options, ignored -> {});
+      backend.write(chain, dir.resolve("candidate.tif"), false, () -> false, options, ignored -> {});
     }
-    try (var a = new GeoTiffSource(new RasterDatasetRef(dir.resolve("baseline.tif").toString()));
-        var b = new GeoTiffSource(new RasterDatasetRef(dir.resolve("candidate.tif").toString()))) {
+    try (var a = new GeoTiffSource(new RasterReference(dir.resolve("baseline.tif").toString(), null));
+        var b = new GeoTiffSource(new RasterReference(dir.resolve("candidate.tif").toString(), null))) {
       assertThat(GeoToolsRasterBackend.descriptor(a))
           .isEqualTo(GeoToolsRasterBackend.descriptor(b));
       var request = new RasterReadRequest(a.bounds(), 0);
@@ -76,7 +65,8 @@ class RasterDatasetTest {
       var derived = backend.derive(value, operation);
       assertThat(derived.result().alphaBand()).isEqualTo(3);
       assertThat(derived.result().bands()).hasSize(4);
-      backend.write(derived, dir.resolve("out.tif"), false, () -> false);
+      backend.write(derived, dir.resolve("out.tif"), false, () -> false,
+          RasterWriteOptions.geoTiff("Deflate"), ignored -> {});
     }
   }
 
@@ -85,11 +75,16 @@ class RasterDatasetTest {
     var input = RasterCoreTest.fixture(dir.resolve("source.tif"));
     try (var backend = new GeoToolsRasterBackend()) {
       var value = backend.describe(input.toString());
-      assertThatThrownBy(() -> backend.write(value, input, true, () -> false))
-          .hasMessageContaining("differ");
+      Path alias = Files.createLink(dir.resolve("alias.tif"), input);
+      for (Path output : List.of(input, alias)) {
+        assertThatThrownBy(
+                () -> backend.write(value, output, true, () -> false,
+                    RasterWriteOptions.geoTiff("Deflate"), ignored -> {}))
+            .hasMessageContaining("differ");
+      }
       Files.setLastModifiedTime(
           input, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() + 10000));
-      assertThatThrownBy(() -> backend.open(value, () -> false)).hasMessageContaining("changed");
+      assertThatThrownBy(() -> backend.session(value, () -> false)).hasMessageContaining("changed");
     }
   }
 
@@ -114,8 +109,8 @@ class RasterDatasetTest {
     Files.move(moved, input);
     try (var a = new GeoToolsRasterBackend();
         var b = new GeoToolsRasterBackend()) {
-      var first = a.open(value, () -> false);
-      var second = b.open(value, () -> false);
+      var first = a.session(value, () -> false);
+      var second = b.session(value, () -> false);
       var tile = first.read(new RasterWindow(0, 0, 2, 2), 0);
       assertThat(tile.samples().isReadOnly()).isTrue();
       first.close();
@@ -134,8 +129,15 @@ class RasterDatasetTest {
     Files.write(target, before);
     try (var backend = new GeoToolsRasterBackend()) {
       var value = backend.describe(input.toString());
-      assertThatThrownBy(() -> backend.write(value, target, true, () -> true))
-          .isInstanceOf(java.io.IOException.class);
+      var stopped = new AtomicBoolean();
+      assertThatThrownBy(
+              () -> backend.write(value, target, true, stopped::get,
+                  RasterWriteOptions.geoTiff("Deflate"), progress -> {
+                    if (progress > 0) stopped.set(true);
+                  }))
+          .isInstanceOf(java.io.IOException.class)
+          .hasMessageContaining("stopped");
+      assertThat(stopped).isTrue();
     }
     assertThat(Files.readAllBytes(target)).isEqualTo(before);
     try (var paths = Files.list(dir)) {
@@ -167,7 +169,7 @@ class RasterDatasetTest {
               new RasterOperation.Clip(
                   "subset", "POLYGON ((0 0,3 0,3 1,0 1,0 0))", false, List.of(2, 0), 255d));
       assertThat(subset.result().color()).isEqualTo("NUMERIC");
-      try (var r = backend.open(subset, () -> false)) {
+      try (var r = backend.session(subset, () -> false)) {
         assertThat(r.read(new RasterWindow(0, 0, 3, 1), 0).samples().get(0)).isEqualTo(70);
         assertThat(r.read(new RasterWindow(0, 0, 3, 1), 1).samples().get(2)).isEqualTo(30);
       }
@@ -176,7 +178,7 @@ class RasterDatasetTest {
               value,
               new RasterOperation.Clip(
                   "mask", "POLYGON ((0 0,3 0,3 1,0 0))", true, List.of(0, 1, 2, 3), null));
-      try (var r = backend.open(masked, () -> false)) {
+      try (var r = backend.session(masked, () -> false)) {
         var alpha = r.read(new RasterWindow(0, 0, 3, 1), 3).samples();
         assertThat(alpha.get(0)).isZero();
         assertThat(alpha.get(1)).isEqualTo(128);
@@ -200,7 +202,7 @@ class RasterDatasetTest {
       var mask =
           backend.derive(
               source, new RasterOperation.Clip("mask", polygon, true, List.of(0, 1, 2), null));
-      try (var reader = backend.open(mask, () -> false)) {
+      try (var reader = backend.session(mask, () -> false)) {
         var alpha = reader.read(new RasterWindow(0, 0, 2, 1), 3).samples();
         assertThat(alpha.get(0)).isZero();
         assertThat(alpha.get(1)).isEqualTo(255);

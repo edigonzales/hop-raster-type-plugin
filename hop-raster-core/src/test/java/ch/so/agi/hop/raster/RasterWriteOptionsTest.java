@@ -61,46 +61,4 @@ class RasterWriteOptionsTest {
             new RasterWriteOptions(
                 RasterWriteOptions.Format.COG, null, null, 8, null));
   }
-
-  @Test
-  void cogRequestsFailOnBackendsWithoutCogSupport() throws Exception {
-    RasterBackend legacy =
-        new RasterBackend() {
-          public RasterDataset describe(String location) {
-            throw new UnsupportedOperationException();
-          }
-
-          public RasterDataset derive(RasterDataset source, RasterOperation operation) {
-            throw new UnsupportedOperationException();
-          }
-
-          public RasterReader open(
-              RasterDataset source, java.util.function.BooleanSupplier stopped) {
-            throw new UnsupportedOperationException();
-          }
-
-          public void write(
-              RasterDataset source,
-              java.nio.file.Path output,
-              boolean overwrite,
-              java.util.function.BooleanSupplier stopped) {}
-        };
-    assertThrows(
-        UnsupportedOperationException.class,
-        () ->
-            legacy.write(
-                null,
-                java.nio.file.Path.of("out.tif"),
-                false,
-                () -> false,
-                RasterWriteOptions.cog("Deflate"),
-                value -> {}));
-    legacy.write(
-        null,
-        java.nio.file.Path.of("out.tif"),
-        false,
-        () -> false,
-        RasterWriteOptions.geoTiff("Deflate"),
-        value -> {});
-  }
 }

@@ -2,11 +2,14 @@ package ch.so.agi.hop.raster.geotools;
 
 import static org.assertj.core.api.Assertions.*;
 
+import ch.so.agi.hop.raster.RasterOperation;
+import ch.so.agi.hop.raster.RasterReference;
+import ch.so.agi.hop.raster.RasterWriteOptions;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.image.*;
-import java.nio.file.*;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.nio.file.Path;
+import java.util.List;
 import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
 import org.geotools.api.referencing.operation.MathTransform;
 import org.geotools.referencing.CRS;
@@ -97,37 +100,27 @@ class RasterReprojectTest {
     public void close() {}
   }
 
-  static RasterReprojectRequest request(Path file, double resolution, boolean bilinear) {
-    return new RasterReprojectRequest(
-        "",
-        resolution,
-        resolution,
-        null,
-        bilinear
-            ? RasterReprojectRequest.Interpolation.BILINEAR
-            : RasterReprojectRequest.Interpolation.NEAREST,
-        RasterReprojectRequest.OutputType.AUTO,
-        null,
-        null,
-        file,
-        false);
+  static RasterOperation.Reproject reproject(double resolution, boolean bilinear) {
+    return new RasterOperation.Reproject(
+        "reproject", "", resolution, resolution, List.of(),
+        bilinear ? "BILINEAR" : "NEAREST", "AUTO", null, null);
   }
 
-  static double[] band(GeoTiffSource source, int band) throws Exception {
+  static double[] band(RasterSource source, int band) throws Exception {
     var r = source.read(new RasterReadRequest(source.bounds(), band));
     return r.getSamples(r.getMinX(), r.getMinY(), r.getWidth(), r.getHeight(), 0, (double[]) null);
   }
 
-  GeoTiffSource write(Source source, RasterReprojectRequest request) throws Exception {
-    RasterReproject.write(source, request, () -> false);
-    return new GeoTiffSource(new RasterDatasetRef(request.output().toString()));
+  private static RasterSource derive(RasterSource source, RasterOperation.Reproject operation)
+      throws Exception {
+    return new DerivedSource(source, operation, () -> false);
   }
 
   @Test
   void nearestIdentityPreservesAllBandsGridAndMetadata() throws Exception {
     var source = new Source();
     source.values = new double[][] {{0, 10, 20, 30}, {11, 12, 13, 14}, {100, 200, 300, 400}};
-    try (var result = write(source, request(dir.resolve("identity.tif"), 1, false))) {
+    try (var result = derive(source, reproject(1, false))) {
       assertThat(result.bands()).isEqualTo(3);
       assertThat(result.colorInfo().kind()).isEqualTo(RasterColorInfo.Kind.NUMERIC);
       for (int b = 0; b < 3; b++) {
@@ -143,12 +136,12 @@ class RasterReprojectTest {
   void bilinearRenormalizesMissingNeighboursAndKeepsZero() throws Exception {
     var source = new Source();
     source.values[0] = new double[] {0, Double.NaN, 20, 30};
-    try (var result = write(source, request(dir.resolve("weighted.tif"), 2, true))) {
+    try (var result = derive(source, reproject(2, true))) {
       assertThat(result.dataType()).isEqualTo(DataBuffer.TYPE_DOUBLE);
       assertThat(band(result, 0)[0]).isCloseTo(50d / 3, within(1e-8));
     }
     source.values[0] = new double[] {0, 10, 20, 30};
-    try (var result = write(source, request(dir.resolve("mean.tif"), 2, true))) {
+    try (var result = derive(source, reproject(2, true))) {
       assertThat(band(result, 0)).containsExactly(15);
     }
   }
@@ -158,22 +151,21 @@ class RasterReprojectTest {
     var source = new Source();
     source.nd = 10d;
     var req =
-        new RasterReprojectRequest(
+        new RasterOperation.Reproject(
+            "reproject",
             "",
             2,
             2,
-            null,
-            RasterReprojectRequest.Interpolation.BILINEAR,
-            RasterReprojectRequest.OutputType.AUTO,
+            List.of(),
+            "BILINEAR",
+            "AUTO",
             20d,
-            -9999d,
-            dir.resolve("override.tif"),
-            false);
-    try (var result = write(source, req)) {
+            -9999d);
+    try (var result = derive(source, req)) {
       assertThat(band(result, 0)[0]).isCloseTo(40d / 3, within(1e-8));
     }
     source.values[0] = new double[] {Double.NaN};
-    try (var result = write(source, request(dir.resolve("empty.tif"), 1, false))) {
+    try (var result = derive(source, reproject(1, false))) {
       assertThat(band(result, 0)).containsExactly(10, 10, 10, 10);
     }
   }
@@ -181,11 +173,11 @@ class RasterReprojectTest {
   @Test
   void upsamplingHasNoHalfPixelShiftOrInvalidEdgeValues() throws Exception {
     var source = new Source();
-    try (var result = write(source, request(dir.resolve("fine.tif"), .5, false))) {
+    try (var result = derive(source, reproject(.5, false))) {
       assertThat(band(result, 0))
           .containsExactly(0, 0, 10, 10, 0, 0, 10, 10, 20, 20, 30, 30, 20, 20, 30, 30);
     }
-    try (var result = write(source, request(dir.resolve("fine-linear.tif"), .5, true))) {
+    try (var result = derive(source, reproject(.5, true))) {
       assertThat(band(result, 0))
           .containsExactly(
               0, 2.5, 7.5, 10, 5, 7.5, 12.5, 15, 15, 17.5, 22.5, 25, 20, 22.5, 27.5, 30);
@@ -196,21 +188,20 @@ class RasterReprojectTest {
   void explicitExtentExpandsToGridAndFillsOutsideSource() throws Exception {
     var source = new Source();
     var req =
-        new RasterReprojectRequest(
+        new RasterOperation.Reproject(
+            "reproject",
             "",
             1,
             1,
-            new RasterReprojectRequest.Extent(-.2, 0, 1.7, 2),
-            RasterReprojectRequest.Interpolation.NEAREST,
-            RasterReprojectRequest.OutputType.AUTO,
+            List.of(-.2, 0d, 1.7, 2d),
+            "NEAREST",
+            "AUTO",
             null,
-            null,
-            dir.resolve("bbox.tif"),
-            false);
-    var grid = RasterTargetGrid.create(source, req);
+            null);
+    var grid = RasterTargetGrid.create(source, DerivedSource.request(req));
     assertThat(grid.width()).isEqualTo(3);
     assertThat(grid.height()).isEqualTo(2);
-    try (var result = write(source, req)) {
+    try (var result = derive(source, req)) {
       assertThat(band(result, 0)).containsExactly(Double.NaN, 0, 10, Double.NaN, 20, 30);
     }
   }
@@ -222,34 +213,37 @@ class RasterReprojectTest {
     source.nd = 255d;
     source.values[0] = new double[] {0, 1, 1, 1};
     var req =
-        new RasterReprojectRequest(
+        new RasterOperation.Reproject(
+            "reproject",
             "",
             2,
             2,
+            List.of(),
+            "BILINEAR",
+            "SOURCE",
             null,
-            RasterReprojectRequest.Interpolation.BILINEAR,
-            RasterReprojectRequest.OutputType.SOURCE,
-            null,
-            null,
-            dir.resolve("integer.tif"),
-            false);
-    try (var result = write(source, req)) {
+            null);
+    try (var result = derive(source, req)) {
       assertThat(band(result, 0)).containsExactly(1);
     }
     var collision =
-        new RasterReprojectRequest(
+        new RasterOperation.Reproject(
+            "reproject",
             "",
             1,
             1,
+            List.of(),
+            "NEAREST",
+            "AUTO",
             null,
-            RasterReprojectRequest.Interpolation.NEAREST,
-            RasterReprojectRequest.OutputType.AUTO,
-            null,
-            1d,
-            dir.resolve("collision.tif"),
-            false);
-    assertThatThrownBy(() -> write(source, collision)).hasStackTraceContaining("collides");
-    assertThat(collision.output()).doesNotExist();
+            1d);
+    assertThatThrownBy(
+            () -> {
+              try (var result = derive(source, collision)) {
+                band(result, 0);
+              }
+            })
+        .hasStackTraceContaining("collides");
     assertThatThrownBy(() -> RasterSampleValues.convert(256, DataBuffer.TYPE_BYTE))
         .hasMessageContaining("overflow");
     assertThatThrownBy(() -> RasterSampleValues.convert(Double.MAX_VALUE, DataBuffer.TYPE_FLOAT))
@@ -266,18 +260,13 @@ class RasterReprojectTest {
     source.color =
         new RasterColorInfo(
             RasterColorInfo.Kind.PALETTE, -1, false, new char[] {65535, 0, 0, 12345, 0, 65535});
-    try (var result = write(source, request(dir.resolve("palette.tif"), 1, false))) {
+    try (var result = derive(source, reproject(1, false))) {
       assertThat(result.colorInfo().kind()).isEqualTo(RasterColorInfo.Kind.PALETTE);
       assertThat(band(result, 0)).containsExactly(0, 1, 0, 1);
       char[] map = result.colorInfo().colorMap();
-      assertThat((int) map[257]).isEqualTo(12345);
-      try (var again =
-          new GeoTiffSource(new RasterDatasetRef(dir.resolve("palette.tif").toString()))) {
-        RasterReproject.write(
-            again, request(dir.resolve("palette-again.tif"), 2, true), () -> false);
-      }
+      assertThat(map).containsExactly(source.color.colorMap());
     }
-    try (var result = write(source, request(dir.resolve("palette-linear.tif"), 2, true))) {
+    try (var result = derive(source, reproject(2, true))) {
       assertThat(result.bands()).isEqualTo(4);
       assertThat(result.dataType()).isEqualTo(DataBuffer.TYPE_USHORT);
       assertThat(band(result, 0)).containsExactly(32768);
@@ -294,7 +283,7 @@ class RasterReprojectTest {
     source.color = new RasterColorInfo(RasterColorInfo.Kind.RGB, 3, false, null);
     source.values =
         new double[][] {{255, 0, 255, 0}, {0, 0, 0, 0}, {0, 255, 0, 255}, {255, 0, 255, 0}};
-    try (var result = write(source, request(dir.resolve("alpha.tif"), 2, true))) {
+    try (var result = derive(source, reproject(2, true))) {
       assertThat(result.colorInfo().alphaBand()).isEqualTo(3);
       assertThat(band(result, 0)).containsExactly(255);
       assertThat(band(result, 1)).containsExactly(0);
@@ -309,7 +298,7 @@ class RasterReprojectTest {
     source.type = DataBuffer.TYPE_BYTE;
     source.color = new RasterColorInfo(RasterColorInfo.Kind.RGB, -1, false, null);
     source.values = new double[][] {{10}, {20}, {30}};
-    try (var result = write(source, request(dir.resolve("rgb.tif"), 1, false))) {
+    try (var result = derive(source, reproject(1, false))) {
       assertThat(result.bands()).isEqualTo(4);
       assertThat(band(result, 0)).containsExactly(10, 10, 10, 10);
       assertThat(band(result, 1)).containsExactly(20, 20, 20, 20);
@@ -317,7 +306,7 @@ class RasterReprojectTest {
     }
     source.color = new RasterColorInfo(RasterColorInfo.Kind.GRAY_ALPHA, 1, true, null);
     source.values = new double[][] {{64}, {128}};
-    try (var result = write(source, request(dir.resolve("gray.tif"), 1, false))) {
+    try (var result = derive(source, reproject(1, false))) {
       assertThat(result.colorInfo().associatedAlpha()).isFalse();
       assertThat(band(result, 0)).containsExactly(128, 128, 128, 128);
       assertThat(band(result, 1)).containsExactly(128, 128, 128, 128);
@@ -331,7 +320,7 @@ class RasterReprojectTest {
     source.height = 100000;
     source.transform = new AffineTransform2D(1, 0, 0, -1, .5, 99999.5);
     source.values[0] = new double[] {42};
-    try (var result = write(source, request(dir.resolve("large.tif"), 25000, true))) {
+    try (var result = derive(source, reproject(25000, true))) {
       assertThat(band(result, 0)).hasSize(16).containsOnly(42);
       assertThat(source.maxPixels).isLessThanOrEqualTo(256 * 1024);
       assertThat(source.reads).isLessThanOrEqualTo(64);
@@ -344,74 +333,39 @@ class RasterReprojectTest {
     source.crs = CRS.decode("EPSG:2056", true);
     source.transform = new AffineTransform2D(1, 0, 0, -1, 2600000.5, 1200001.5);
     var req =
-        new RasterReprojectRequest(
+        new RasterOperation.Reproject(
+            "reproject",
             "EPSG:4326",
             .00001,
             .00001,
+            List.of(),
+            "NEAREST",
+            "AUTO",
             null,
-            RasterReprojectRequest.Interpolation.NEAREST,
-            RasterReprojectRequest.OutputType.AUTO,
-            null,
-            null,
-            dir.resolve("wgs.tif"),
-            false);
-    var grid = RasterTargetGrid.create(source, req);
+            null);
+    var grid = RasterTargetGrid.create(source, DerivedSource.request(req));
     double[] p = {0, 0};
     grid.gridToWorld().transform(p, 0, p, 0, 1);
     assertThat(p[0]).isCloseTo(7.43863, within(.0001));
     assertThat(p[1]).isCloseTo(46.95108, within(.0001));
-    try (var result = write(source, req)) {
+    try (var result = derive(source, req)) {
       assertThat(CRS.lookupEpsgCode(result.crs(), true)).isEqualTo(4326);
     }
     source.crs = CRS.decode("EPSG:3857", true);
     source.transform = new AffineTransform2D(0, 1, 2, 0, 1, .5);
     var rectangular =
-        new RasterReprojectRequest(
+        new RasterOperation.Reproject(
+            "reproject",
             "",
             2,
             1,
+            List.of(),
+            "NEAREST",
+            "AUTO",
             null,
-            RasterReprojectRequest.Interpolation.NEAREST,
-            RasterReprojectRequest.OutputType.AUTO,
-            null,
-            null,
-            dir.resolve("rotated.tif"),
-            false);
-    try (var result = write(source, rectangular)) {
+            null);
+    try (var result = derive(source, rectangular)) {
       assertThat(band(result, 0)).containsExactly(10, 30, 0, 20);
-    }
-  }
-
-  @Test
-  void outputPreservedOnCancellationFailureAndSameFileRejected() throws Exception {
-    var source = new Source();
-    Path file = dir.resolve("existing.tif");
-    Files.writeString(file, "original");
-    assertThatThrownBy(() -> write(source, request(file, 1, false))).hasMessageContaining("exists");
-    var req =
-        new RasterReprojectRequest(
-            "",
-            1,
-            1,
-            null,
-            RasterReprojectRequest.Interpolation.NEAREST,
-            RasterReprojectRequest.OutputType.AUTO,
-            null,
-            null,
-            file,
-            true);
-    var checks = new AtomicInteger();
-    assertThatThrownBy(() -> RasterReproject.write(source, req, () -> checks.incrementAndGet() > 2))
-        .hasStackTraceContaining("stopped");
-    assertThat(Files.readString(file)).isEqualTo("original");
-    try (var files = Files.list(dir)) {
-      assertThat(files.map(p -> p.getFileName().toString()).toList())
-          .containsExactly("existing.tif");
-    }
-    Path input = dir.resolve("input.tif");
-    try (var result = write(source, request(input, 1, false))) {
-      assertThatThrownBy(() -> RasterReproject.write(result, request(input, 1, false), () -> false))
-          .hasMessageContaining("differ");
     }
   }
 
@@ -424,12 +378,16 @@ class RasterReprojectTest {
               2,
               alpha,
               new int[][] {{64, 0}, {0, 128}, {0, 0}, {128, 128}});
-      try (var source = new GeoTiffSource(new RasterDatasetRef(file.toString()))) {
+      try (var source = new GeoTiffSource(new RasterReference(file.toString(), null))) {
         assertThat(source.colorInfo().associatedAlpha()).isEqualTo(alpha == 1);
         assertThat(band(source, 0)).containsExactly(64, 0);
         Path output = dir.resolve("output-alpha-" + alpha + ".tif");
-        RasterReproject.write(source, request(output, 1, false), () -> false);
-        try (var result = new GeoTiffSource(new RasterDatasetRef(output.toString()))) {
+        try (var backend = new GeoToolsRasterBackend()) {
+          var value = backend.describe(file.toString());
+          backend.write(backend.derive(value, reproject(1, false)), output, false, () -> false,
+              RasterWriteOptions.geoTiff("Deflate"), ignored -> {});
+        }
+        try (var result = new GeoTiffSource(new RasterReference(output.toString(), null))) {
           assertThat(band(result, 0)).containsExactly(alpha == 1 ? 128 : 64, 0);
           assertThat(band(result, 1)).containsExactly(0, alpha == 1 ? 255 : 128);
           assertThat(band(result, 3)).containsExactly(128, 128);
@@ -447,7 +405,7 @@ class RasterReprojectTest {
     source.values[0] = new double[source.width * source.height];
     for (int y = 0; y < source.height; y++)
       for (int x = 0; x < source.width; x++) source.values[0][y * source.width + x] = x + 10 * y;
-    try (var result = write(source, request(dir.resolve("tiles.tif"), .5, true))) {
+    try (var result = derive(source, reproject(.5, true))) {
       double[] values = band(result, 0);
       for (int y = 0; y < 8; y++)
         for (int x = 0; x < 1040; x++) {
@@ -462,22 +420,21 @@ class RasterReprojectTest {
   }
 
   @Test
-  void floatingTypeAndNegativeValuesSurviveRoundtrip() throws Exception {
+  void floatingTypeAndNegativeValuesSurviveResampling() throws Exception {
     var source = new Source();
     source.values[0] = new double[] {-100.25, 0, 10.5, 22.25};
     var req =
-        new RasterReprojectRequest(
+        new RasterOperation.Reproject(
+            "reproject",
             "",
             2,
             2,
+            List.of(),
+            "BILINEAR",
+            "FLOAT32",
             null,
-            RasterReprojectRequest.Interpolation.BILINEAR,
-            RasterReprojectRequest.OutputType.FLOAT32,
-            null,
-            null,
-            dir.resolve("float32.tif"),
-            false);
-    try (var result = write(source, req)) {
+            null);
+    try (var result = derive(source, req)) {
       assertThat(result.dataType()).isEqualTo(DataBuffer.TYPE_FLOAT);
       assertThat(band(result, 0)).containsExactly(-16.875);
     }
@@ -489,7 +446,7 @@ class RasterReprojectTest {
     source.crs = CRS.decode("EPSG:4326", true);
     source.transform = new AffineTransform2D(2, 0, 0, -1, 179, 1.5);
     assertThatThrownBy(
-            () -> RasterTargetGrid.create(source, request(dir.resolve("date.tif"), 1, false)))
+            () -> RasterTargetGrid.create(source, DerivedSource.request(reproject(1, false))))
         .hasMessageContaining("longitude");
   }
 
@@ -516,12 +473,19 @@ class RasterReprojectTest {
         null,
         color,
         options);
-    try (var source = new GeoTiffSource(new RasterDatasetRef(path.toString()))) {
+    try (var source = new GeoTiffSource(new RasterReference(path.toString(), null))) {
       assertThat((int) source.colorInfo().colorMap()[257]).isEqualTo(12345);
       assertThat(band(source, 0)).containsExactly(0, 1, 1, 0);
     }
     try (var backend = new GeoToolsRasterBackend()) {
       var value = backend.describe(path.toString());
+      Path warped = dir.resolve("palette-reproject.tif");
+      backend.write(backend.derive(value, reproject(1, false)), warped, false, () -> false,
+          RasterWriteOptions.geoTiff("Deflate"), ignored -> {});
+      try (var result = new GeoTiffSource(new RasterReference(warped.toString(), null))) {
+        assertThat((int) result.colorInfo().colorMap()[257]).isEqualTo(12345);
+        assertThat(band(result, 0)).containsExactly(0, 1, 1, 0);
+      }
       String box = "POLYGON ((0 0,2 0,2 2,0 2,0 0))";
       var crop =
           backend.derive(
@@ -529,7 +493,8 @@ class RasterReprojectTest {
               new ch.so.agi.hop.raster.RasterOperation.Clip(
                   "palette-crop", box, false, java.util.List.of(0), null));
       assertThat(crop.result().palette()).isEqualTo(value.result().palette());
-      backend.write(crop, dir.resolve("palette-crop.tif"), false, () -> false);
+      backend.write(crop, dir.resolve("palette-crop.tif"), false, () -> false,
+          RasterWriteOptions.geoTiff("Deflate"), ignored -> {});
       assertThatThrownBy(
               () ->
                   backend.derive(
@@ -542,30 +507,30 @@ class RasterReprojectTest {
               value,
               new ch.so.agi.hop.raster.RasterOperation.Clip(
                   "palette-mask", box, true, java.util.List.of(0), 255d));
-      backend.write(mask, dir.resolve("palette-mask.tif"), false, () -> false);
+      backend.write(mask, dir.resolve("palette-mask.tif"), false, () -> false,
+          RasterWriteOptions.geoTiff("Deflate"), ignored -> {});
     }
   }
 
   @Test
   void invalidSettingsAndDisjointExtentFailBeforeOutput() throws Exception {
     var source = new Source();
-    assertThatThrownBy(() -> request(dir.resolve("invalid.tif"), 0, false))
-        .hasMessageContaining("Pixel sizes");
+    assertThatThrownBy(() -> reproject(0, false))
+        .hasMessageContaining("Invalid target grid");
     var disjoint =
-        new RasterReprojectRequest(
+        new RasterOperation.Reproject(
+            "reproject",
             "",
             1,
             1,
-            new RasterReprojectRequest.Extent(100, 100, 102, 102),
-            RasterReprojectRequest.Interpolation.NEAREST,
-            RasterReprojectRequest.OutputType.AUTO,
+            List.of(100d, 100d, 102d, 102d),
+            "NEAREST",
+            "AUTO",
             null,
-            null,
-            dir.resolve("disjoint.tif"),
-            false);
-    assertThatThrownBy(() -> write(source, disjoint)).hasMessageContaining("overlap");
+            null);
+    assertThatThrownBy(() -> derive(source, disjoint)).hasMessageContaining("overlap");
     source.crs = null;
-    assertThatThrownBy(() -> write(source, request(dir.resolve("missing-crs.tif"), 1, false)))
+    assertThatThrownBy(() -> derive(source, reproject(1, false)))
         .hasMessageContaining("CRS");
   }
 }

@@ -14,7 +14,7 @@ import org.eclipse.imagen.*;
 import org.geotools.gce.geotiff.GeoTiffWriteParams;
 
 /** Explicit execution context. One instance per consumer transform copy. */
-public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable {
+public final class GeoToolsRasterBackend implements AutoCloseable {
   private static final List<String> KNOWN_TIFF_COMPRESSION_TYPES =
       List.of(
           "CCITT RLE",
@@ -47,7 +47,7 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
       throw new java.io.IOException("Raster source changed: " + ref.location());
     if (!ref.equals(current)) {
       close();
-      source = new GeoTiffSource(new RasterDatasetRef(ref.location()));
+      source = new GeoTiffSource(ref);
       current = ref;
       if (ref.remote() && ref.identity() != null && !ref.identity().equals(source.httpIdentity())) {
         close();
@@ -58,7 +58,6 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
     return source;
   }
 
-  @Override
   public RasterDataset describe(String location) throws Exception {
     var ref = new RasterReference(location, identity(location));
     if (ref.remote() && current != null && current.location().equals(ref.location())) ref = current;
@@ -70,17 +69,11 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
     return new RasterDataset(ref, sourceDescriptor, List.of());
   }
 
-  @Override
   public RasterDataset derive(RasterDataset value, RasterOperation operation) throws Exception {
     try (var planning = new DescriptorSource(value.result());
         var derived = new DerivedSource(planning, operation, () -> false)) {
       return value.append(operation, descriptor(derived));
     }
-  }
-
-  @Override
-  public RasterReader open(RasterDataset value, BooleanSupplier stopped) throws Exception {
-    return session(value, stopped);
   }
 
   public Session session(RasterDataset value, BooleanSupplier stopped) throws Exception {
@@ -110,7 +103,7 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
     }
   }
 
-  public final class Session implements RasterReader {
+  public final class Session implements AutoCloseable {
     private final RasterSource source;
     private final List<DerivedSource> owned;
     private final RasterDataset value;
@@ -167,6 +160,7 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
       return new RasterTile(window, java.nio.DoubleBuffer.wrap(data));
     }
 
+    @Override
     public void close() {
       if (!closed) {
         closed = true;
@@ -230,25 +224,6 @@ public final class GeoToolsRasterBackend implements RasterBackend, AutoCloseable
         palette);
   }
 
-  @Override
-  public void write(RasterDataset value, Path target, boolean overwrite, BooleanSupplier stopped)
-      throws Exception {
-    write(value, target, overwrite, stopped, "Deflate", ignored -> {});
-  }
-
-  @Override
-  public void write(
-      RasterDataset value,
-      Path target,
-      boolean overwrite,
-      BooleanSupplier stopped,
-      String compression,
-      IntConsumer progress)
-      throws Exception {
-    write(value, target, overwrite, stopped, RasterWriteOptions.geoTiff(compression), progress);
-  }
-
-  @Override
   public void write(
       RasterDataset value,
       Path target,

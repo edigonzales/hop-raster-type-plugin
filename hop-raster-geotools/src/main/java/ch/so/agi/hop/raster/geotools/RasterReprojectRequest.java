@@ -1,7 +1,5 @@
 package ch.so.agi.hop.raster.geotools;
 
-import java.nio.file.Path;
-
 /** Resolutions and optional extent are in target CRS units; null CRS means source CRS. */
 public record RasterReprojectRequest(
     String targetCrs,
@@ -11,9 +9,7 @@ public record RasterReprojectRequest(
     Interpolation interpolation,
     OutputType outputType,
     Double sourceNoData,
-    Double outputNoData,
-    Path output,
-    boolean overwrite) {
+    Double outputNoData) {
   public enum Interpolation {
     NEAREST,
     BILINEAR
@@ -45,8 +41,8 @@ public record RasterReprojectRequest(
         || !Double.isFinite(resolutionX)
         || !Double.isFinite(resolutionY))
       throw new IllegalArgumentException("Pixel sizes must be positive and finite");
-    if (interpolation == null || outputType == null || output == null)
-      throw new IllegalArgumentException("Interpolation, output type and file are required");
+    if (interpolation == null || outputType == null)
+      throw new IllegalArgumentException("Interpolation and output type are required");
     if ((sourceNoData != null && Double.isInfinite(sourceNoData))
         || (outputNoData != null && Double.isInfinite(outputNoData)))
       throw new IllegalArgumentException("NoData cannot be infinite");

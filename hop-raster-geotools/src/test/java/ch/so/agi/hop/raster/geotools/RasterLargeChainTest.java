@@ -37,10 +37,11 @@ class RasterLargeChainTest {
               clipped,
               new RasterOperation.Reproject(
                   "large-warp", "EPSG:2056", 1, 1, List.of(), "NEAREST", "AUTO", null, null));
-      backend.write(warped, outputFile, true, () -> false);
+      backend.write(warped, outputFile, true, () -> false,
+          RasterWriteOptions.geoTiff("Deflate"), ignored -> {});
       RasterTestSupport.resources(backend, 0);
-      try (var actual = new GeoTiffSource(new RasterDatasetRef(outputFile.toString()));
-          var source = new GeoTiffSource(new RasterDatasetRef(inputFile.toString()))) {
+      try (var actual = new GeoTiffSource(new RasterReference(outputFile.toString(), null));
+          var source = new GeoTiffSource(new RasterReference(inputFile.toString(), null))) {
         if (actual.bounds().width != size / 2 || actual.bounds().height != size / 2)
           throw new AssertionError("Unexpected output grid");
         int[] points = {0, 1, 255, 256, 511, 512, 513, size / 4, size / 2 - 1};

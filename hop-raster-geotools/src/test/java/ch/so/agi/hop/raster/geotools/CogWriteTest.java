@@ -3,6 +3,7 @@ package ch.so.agi.hop.raster.geotools;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.so.agi.hop.raster.RasterReference;
 import ch.so.agi.hop.raster.RasterWriteOptions;
 import java.awt.Rectangle;
 import java.awt.image.DataBuffer;
@@ -69,8 +70,8 @@ class CogWriteTest {
       assertThat(overview.tileOffsets()).isSorted();
       tiff.checkLeadersAndTrailers();
 
-      try (var written = new GeoTiffSource(new RasterDatasetRef(output.toString()))) {
-        try (var plain = new GeoTiffSource(new RasterDatasetRef(input.toString()))) {
+      try (var written = new GeoTiffSource(new RasterReference(output.toString(), null))) {
+        try (var plain = new GeoTiffSource(new RasterReference(input.toString(), null))) {
           for (int y = 0; y < 1024; y += 256)
             for (int x = 0; x < 1024; x += 256) {
               var expected = plain.read(new RasterReadRequest(new Rectangle(x, y, 256, 256), 0));
@@ -99,7 +100,7 @@ class CogWriteTest {
           RasterWriteOptions.cog("Deflate"),
           ignored -> {});
     }
-    try (var source = new GeoTiffSource(new RasterDatasetRef(input.toString()));
+    try (var source = new GeoTiffSource(new RasterReference(input.toString(), null));
         ImageInputStream stream = ImageIO.createImageInputStream(output.toFile())) {
       ImageReader reader = ImageIO.getImageReaders(stream).next();
       reader.setInput(stream);
@@ -145,7 +146,7 @@ class CogWriteTest {
             ignored -> {});
         Tiff tiff = Tiff.read(output);
         assertThat(tiff.ifds.get(0).shortValue(259)).isEqualTo(entry.getValue());
-        try (var written = new GeoTiffSource(new RasterDatasetRef(output.toString()))) {
+        try (var written = new GeoTiffSource(new RasterReference(output.toString(), null))) {
           assertThat(
                   written
                       .read(new RasterReadRequest(new Rectangle(0, 0, 4, 3), 0))
@@ -215,7 +216,7 @@ class CogWriteTest {
   void writesBigTiffContainerDirectly() throws Exception {
     Path input = RasterCoreTest.fixture(dir.resolve("input.tif"));
     Path output = dir.resolve("big.tif");
-    try (var source = new GeoTiffSource(new RasterDatasetRef(input.toString()))) {
+    try (var source = new GeoTiffSource(new RasterReference(input.toString(), null))) {
       CogOutput.write(
           output,
           source,
@@ -233,7 +234,7 @@ class CogWriteTest {
         .isGreaterThan(tiff.ifds.get(1).offset)
         .isLessThan(tiff.minDataOffset(tiff.ifds.get(0)));
     tiff.checkLeadersAndTrailers();
-    try (var written = new GeoTiffSource(new RasterDatasetRef(output.toString()))) {
+    try (var written = new GeoTiffSource(new RasterReference(output.toString(), null))) {
       assertThat(
               written
                   .read(new RasterReadRequest(new Rectangle(0, 0, 4, 3), 0))
@@ -287,7 +288,7 @@ class CogWriteTest {
           assertThat(main.shortValue(262)).isEqualTo(3);
           assertThat(main.has(320)).isTrue();
           // Averaging palette indexes is not meaningful; the overview keeps source samples.
-          try (var source = new GeoTiffSource(new RasterDatasetRef(input.toString()));
+          try (var source = new GeoTiffSource(new RasterReference(input.toString(), null));
               ImageInputStream stream = ImageIO.createImageInputStream(output.toFile())) {
             ImageReader reader = ImageIO.getImageReaders(stream).next();
             reader.setInput(stream);
@@ -367,7 +368,7 @@ class CogWriteTest {
     try (var backend = new GeoToolsRasterBackend()) {
       backend.write(backend.describe(input.toString()), output, false, () -> false, options, ignored -> {});
     }
-    try (var source = new GeoTiffSource(new RasterDatasetRef(input.toString()));
+    try (var source = new GeoTiffSource(new RasterReference(input.toString(), null));
         ImageInputStream stream = ImageIO.createImageInputStream(output.toFile())) {
       ImageReader reader = ImageIO.getImageReaders(stream).next();
       reader.setInput(stream);
@@ -449,8 +450,7 @@ class CogWriteTest {
     server.start();
     try (var source =
         new GeoTiffSource(
-            new RasterDatasetRef(
-                "http://127.0.0.1:" + server.getAddress().getPort() + "/cog.tif"))) {
+            new RasterReference("http://127.0.0.1:" + server.getAddress().getPort() + "/cog.tif", null))) {
       var request = new RasterReadRequest(new Rectangle(0, 0, 256, 256), 0);
       assertThat(source.read(request).getSampleDouble(3, 2, 0)).isEqualTo(12);
       long first = bytes.get();
@@ -465,8 +465,8 @@ class CogWriteTest {
 
   private static void assertSamePixels(Path expectedFile, Path actualFile, String kind)
       throws Exception {
-    try (var expected = new GeoTiffSource(new RasterDatasetRef(expectedFile.toString()));
-        var actual = new GeoTiffSource(new RasterDatasetRef(actualFile.toString()))) {
+    try (var expected = new GeoTiffSource(new RasterReference(expectedFile.toString(), null));
+        var actual = new GeoTiffSource(new RasterReference(actualFile.toString(), null))) {
       int width = expected.bounds().width, height = expected.bounds().height;
       int bands = expected.bands();
       for (int y = 0; y < height; y += 256)
